@@ -22,14 +22,19 @@
 
 ## 계획
 
-1. 내려받기 파일 / API로 원본 수집 → `data/raw.sqlite` (원본 JSON 그대로 보관)
+1. (완료) API로 원본 수집 → `data/raw.sqlite` (원본 JSON 그대로 보관)
 2. 스키마: 표제어, 뜻풀이, 역사 속 표기, 관련어, 세기별 용례, 참고 자료
 3. 조회용 DB 빌드(FTS5) → 조회 CLI → (선택) MCP 서버
 4. 정기 업데이트(변경 감지)
 
 ## 상태
 
-폴더만 생성됨. 아직 코드 없음.
+수집기 `urimal_fetch.py` 완성(원본 XML을 `data/raw.sqlite`에 저장, 이어받기, 하루 45,000건 가드). 빌드·조회는 아직 없음.
+
+```
+python3 urimal_fetch.py fetch --range 1 20000
+python3 urimal_fetch.py status
+```
 
 ## 데이터 출처
 
