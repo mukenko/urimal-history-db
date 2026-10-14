@@ -29,14 +29,19 @@
 
 ## 상태
 
-수집기 `urimal_fetch.py` 완성(원본 XML을 `data/raw.sqlite`에 저장, 이어받기, 하루 45,000건 가드). `urimal_build.py`로 조회용 DB(`data/urimal.sqlite`)를 만듭니다. 조회는 아직 없음.
+수집기 `urimal_fetch.py` 완성(원본 XML을 `data/raw.sqlite`에 저장, 이어받기, 하루 45,000건 가드). `urimal_build.py`로 조회용 DB(`data/urimal.sqlite`)를 만듭니다. `urimal_lookup.py`로 조회합니다.
 
 ```
 python3 urimal_fetch.py fetch --range 1 20000
 python3 urimal_fetch.py status
 python3 urimal_build.py
+python3 urimal_lookup.py 고드름           # 표제어 조회 (--by hist|def|prefix, --code, --examples)
 ```
 
 ## 데이터 출처
 
 국립국어원 우리말역사어휘사전. 이 저장소에는 코드만 올리고 사전 데이터는 포함하지 않습니다.
+
+## 알려진 한계
+
+- Open API는 `language_info`(어휘 역사 설명), `other_info`(부가 정보), `annotations`(기타 정보)를 **256자에서 잘라** 보냅니다. 해당 필드 약 4,400건(어휘 역사 설명 기준)이 잘려 있습니다. 전체 글은 누리집이나 내려받기 파일에만 있을 수 있습니다.
