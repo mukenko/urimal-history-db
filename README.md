@@ -42,6 +42,14 @@ python3 urimal_lookup.py 고드름           # 표제어 조회 (--by hist|def|p
 
 국립국어원 우리말역사어휘사전. 이 저장소에는 코드만 올리고 사전 데이터는 포함하지 않습니다.
 
-## 알려진 한계
+## 데이터 출처와 병합
 
-- Open API는 `language_info`(어휘 역사 설명), `other_info`(부가 정보), `annotations`(기타 정보)를 **256자에서 잘라** 보냅니다. 해당 필드 약 4,400건(어휘 역사 설명 기준)이 잘려 있습니다. 전체 글은 누리집이나 내려받기 파일에만 있을 수 있습니다.
+- **Open API(`urimal_fetch.py`)**: 기본 원본. 다만 어휘 역사 설명·부가 정보·기타 정보를 256자에서 자르고, 표제어 8개는 내주지 않습니다.
+- **누리집 전체 내려받기(`urimal_import.py`)**: 검색 결과 화면의 '내려받기' → '전체 사전 내려받기'(XML, 매달 1회 생성). 전문이 들어 있고 표제어도 15,034개 전부지만, 큰따옴표(“ ”)가 빠지고 줄바꿈이 없으며 용례 강조(`<strong>`)가 없습니다.
+- **빌드(`urimal_build.py`)**: API를 기본으로 하고, 잘린 설명의 뒷부분과 API에 없는 표제어 8개만 내려받기 파일로 채웁니다. `entries.source`(`api`/`download`)와 `entries.merged_fields`로 어디서 왔는지 남깁니다. 이어 붙인 뒷부분에는 큰따옴표와 줄바꿈이 없습니다.
+
+```
+python3 urimal_fetch.py fetch --range 1 20000
+python3 urimal_import.py data/download/full_20261001.zip
+python3 urimal_build.py
+```
