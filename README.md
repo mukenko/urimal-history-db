@@ -29,7 +29,7 @@
 
 ## 상태
 
-수집기 `urimal_fetch.py` 완성(원본 XML을 `data/raw.sqlite`에 저장, 이어받기, 하루 45,000건 가드). `urimal_build.py`로 조회용 DB(`data/urimal.sqlite`)를 만듭니다. `urimal_lookup.py`로 조회합니다.
+수집기 `urimal_fetch.py` 완성(원본 XML을 `data/raw.sqlite`에 저장, 이어받기, 하루 45,000건 가드). `urimal_build.py`로 조회용 DB(`data/urimal.sqlite`)를 만듭니다. `urimal_lookup.py`로 조회하고 `urimal_mcp.py`로 MCP 서버를 띄웁니다.
 
 ```
 python3 urimal_fetch.py fetch --range 1 20000
@@ -41,6 +41,29 @@ python3 urimal_lookup.py 고드름           # 표제어 조회 (--by hist|def|p
 ## 데이터 출처
 
 국립국어원 우리말역사어휘사전. 이 저장소에는 코드만 올리고 사전 데이터는 포함하지 않습니다.
+
+## MCP 서버
+
+LLM이 기억이 아니라 사전을 보고 낱말의 옛 표기·어원·용례를 확인하게 하는 읽기 전용 MCP 서버입니다.
+도구 2개: `lookup_word`(동형이의어 전부, 어휘 역사·설명·용례·참고 자료. 옛 표기로 찾아도 표제어를 보여 줌)와
+`search_dictionary`(`historical_form` 옛 표기 / `definition` 뜻풀이 / `prefix` 앞부분으로 역검색).
+
+```
+python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt   # mcp 2.x 는 파이썬 3.10 이상
+python3 urimal_mcp.py --call lookup_word 고드름        # SDK 없이 도구 결과 확인
+```
+
+- **stdio**(LM Studio, Claude 데스크톱): `{"mcpServers": {"urimal-history": {"command": "/경로/urimal-history-db/.venv/bin/python", "args": ["/경로/urimal-history-db/urimal_mcp.py"]}}}`
+- **Streamable HTTP**: `.venv/bin/python urimal_mcp.py --http --port 8767`. 127.0.0.1에만 바인드하고 Bearer 토큰이 필수입니다
+  (`~/.config/urimal-mcp/token`, 권한 600; 만드는 법은 서버가 알려 줌). 외부 노출은 프록시가 맡고, 접속에 쓰는 이름은 `URIMAL_MCP_HOSTS`.
+
+## 테스트
+
+조회용 DB를 빌드한 뒤 실행합니다(DB는 저장소에 없습니다).
+```
+python3 -m unittest tests.test_lookup
+.venv/bin/python -m unittest tests.test_mcp_stdio
+```
 
 ## 데이터 출처와 병합
 

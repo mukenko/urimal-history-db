@@ -144,6 +144,52 @@ def show_list(db, codes, q=None):
         print(f"  #{code:<6} {e['form']}({e['word_number']}) [{e['type']}]  {d[:60]}")
 
 
+class Miss(Exception):
+    """찾는 것이 없을 때(메시지는 사용자에게 그대로 보여 준다)."""
+
+
+def query(db, by, q, examples, limit, max_entries=None):
+    """조회 결과를 stdout 으로 출력한다. 찾지 못하면 Miss. (CLI 와 MCP 서버가 함께 쓴다.)"""
+    q = norm(q)
+    if not q:
+        raise Miss("검색어가 비어 있습니다.")
+    cap = (lambda codes: codes[:max_entries]) if max_entries else (lambda codes: codes)
+    if by == "form":
+        codes = find_form(db, q)
+        if codes:
+            for c in cap(codes):
+                show_entry(db, c, examples)
+            if max_entries and len(codes) > max_entries:
+                print(f"(동형 표제어 {len(codes)}개 중 {max_entries}개만 표시)")
+            return
+        codes = find_hist(db, q)
+        if codes:
+            print(f"'{q}' 는 표제어가 아니지만 역사 속 표기로 나옵니다:\n")
+            for c in codes[:limit]:
+                show_entry(db, c, examples)
+            return
+        codes = find_prefix(db, q, limit)
+        if codes:
+            print(f"'{q}' 로 시작하는 표제어 {len(codes)}개 (최대 {limit}):")
+            show_list(db, codes)
+            return
+        raise Miss(f"'{q}': 찾지 못했습니다. 뜻풀이 안을 찾으려면 --by def 를 쓰세요.")
+    elif by == "hist":
+        codes = find_hist(db, q)
+    elif by == "prefix":
+        codes = find_prefix(db, q, limit)
+    else:
+        codes = find_def(db, q, limit)
+    if not codes:
+        raise Miss(f"'{q}': 찾지 못했습니다.")
+    if len(codes) <= 3 and by != "prefix":
+        for c in codes:
+            show_entry(db, c, examples)
+    else:
+        print(f"{len(codes)}개 (최대 {limit}):")
+        show_list(db, codes)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("query", nargs="?", help="검색어")
@@ -159,46 +205,15 @@ def main():
         except ValueError:
             ap.error("--examples 는 0, 숫자, all 중 하나")
     db = connect()
-
     if args.code:
         show_entry(db, args.code, args.examples)
         return
     if not args.query:
         ap.error("검색어나 --code 가 필요합니다")
-    q = norm(args.query)
-
-    if args.by == "form":
-        codes = find_form(db, q)
-        if codes:
-            for c in codes:
-                show_entry(db, c, args.examples)
-            return
-        codes = find_hist(db, q)
-        if codes:
-            print(f"'{q}' 는 표제어가 아니지만 역사 속 표기로 나옵니다:\n")
-            for c in codes[:args.limit]:
-                show_entry(db, c, args.examples)
-            return
-        codes = find_prefix(db, q, args.limit)
-        if codes:
-            print(f"'{q}' 로 시작하는 표제어 {len(codes)}개 (--limit {args.limit}):")
-            show_list(db, codes)
-            return
-        sys.exit(f"'{q}': 찾지 못했습니다. --by def 로 뜻풀이 안을 찾아보세요.")
-    elif args.by == "hist":
-        codes = find_hist(db, q)
-    elif args.by == "prefix":
-        codes = find_prefix(db, q, args.limit)
-    else:
-        codes = find_def(db, q, args.limit)
-    if not codes:
-        sys.exit(f"'{q}': 찾지 못했습니다.")
-    if len(codes) <= 3:
-        for c in codes:
-            show_entry(db, c, args.examples)
-    else:
-        print(f"{len(codes)}개 (--limit {args.limit}):")
-        show_list(db, codes)
+    try:
+        query(db, args.by, args.query, args.examples, args.limit)
+    except Miss as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":
