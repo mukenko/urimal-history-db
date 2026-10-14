@@ -29,11 +29,12 @@
 
 ## 상태
 
-수집기 `urimal_fetch.py` 완성(원본 XML을 `data/raw.sqlite`에 저장, 이어받기, 하루 45,000건 가드). 빌드·조회는 아직 없음.
+수집기 `urimal_fetch.py` 완성(원본 XML을 `data/raw.sqlite`에 저장, 이어받기, 하루 45,000건 가드). `urimal_build.py`로 조회용 DB(`data/urimal.sqlite`)를 만듭니다. 조회는 아직 없음.
 
 ```
 python3 urimal_fetch.py fetch --range 1 20000
 python3 urimal_fetch.py status
+python3 urimal_build.py
 ```
 
 ## 데이터 출처
