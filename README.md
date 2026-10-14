@@ -25,7 +25,7 @@
 1. (완료) API로 원본 수집 → `data/raw.sqlite` (원본 JSON 그대로 보관)
 2. 스키마: 표제어, 뜻풀이, 역사 속 표기, 관련어, 세기별 용례, 참고 자료
 3. 조회용 DB 빌드(FTS5) → 조회 CLI → (선택) MCP 서버
-4. 정기 업데이트(변경 감지)
+4. (완료) 정기 업데이트
 
 ## 상태
 
@@ -57,11 +57,26 @@ python3 urimal_mcp.py --call lookup_word 고드름        # SDK 없이 도구 �
 - **Streamable HTTP**: `.venv/bin/python urimal_mcp.py --http --port 8767`. 127.0.0.1에만 바인드하고 Bearer 토큰이 필수입니다
   (`~/.config/urimal-mcp/token`, 권한 600; 만드는 법은 서버가 알려 줌). 외부 노출은 프록시가 맡고, 접속에 쓰는 이름은 `URIMAL_MCP_HOSTS`.
 
+## 정기 업데이트
+
+```
+python3 urimal_update.py --dry-run     # 할 일만 보기
+python3 urimal_update.py               # 오늘 할 일 전체
+python3 urimal_update.py --status      # 마지막 결과·변경 기록·로그
+```
+
+이 사전의 API에는 '고친 날짜' 검색이 없어서 변경은 다시 받아 비교합니다.
+매일: ① 누리집 전체 내려받기 파일의 생성일이 새로우면(매달 1회 생성) 받아서 가져오기 → ② 내려받기 파일에만 있는 표제어 확인 → ③ 가장 큰 코드 뒤 100개로 새 표제어 감지 → ④ 가장 오래 확인하지 않은 3,000개를 다시 받아 비교(수정·삭제 감지, 약 5일에 한 바퀴) → ⑤ 바뀐 것이 있을 때만 조회용 DB 재빌드(검증 통과 시에만 교체).
+하루 API 호출은 20,000건까지(한도 50,000건), 삭제는 두 번 연속 빈 응답일 때만 확정하고 원본은 `raw_removed`에 남깁니다.
+로그는 `data/update.log`(15일 지난 줄은 자동 삭제). 새 표제어·삭제 확정이 있으면 macOS 알림을 띄웁니다.
+매일 실행은 launchd로 합니다: `com.lexlabs.urimalupdate.plist`(08:45)를 `~/Library/LaunchAgents/`에 복사하고
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.lexlabs.urimalupdate.plist`.
+
 ## 테스트
 
 조회용 DB를 빌드한 뒤 실행합니다(DB는 저장소에 없습니다).
 ```
-python3 -m unittest tests.test_lookup
+python3 -m unittest tests.test_lookup tests.test_update
 .venv/bin/python -m unittest tests.test_mcp_stdio
 ```
 

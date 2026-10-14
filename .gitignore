@@ -8,3 +8,6 @@ data/
 *.sqlite-wal
 *.log
 /HANDOFF.md
+
+# 사용자 경로가 들어 있는 launchd 설정(프로젝트에서 ~/Library/LaunchAgents 로 복사해 사용)
+/com.lexlabs.urimalupdate.plist
