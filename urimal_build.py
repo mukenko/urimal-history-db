@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import sys
+import unicodedata
 import xml.etree.ElementTree as ET
 import zlib
 from pathlib import Path
@@ -136,7 +137,7 @@ def flat(e, keep_strong=False):
 
 _LIT_WORD_NO = re.compile(r"<word_no>(.*?)</word_no>", re.S)
 _LIT_BR = re.compile(r"<br\s*/?>", re.I)
-_IGNORE = re.compile(r"[\s\u201c\u201d]")      # 공백과 큰따옴표: 내려받기 파일에는 큰따옴표가 없다
+_IGNORE = re.compile(r"[\s\u201c\u201d#]")       # 공백·큰따옴표·문단 구분(##): 내려받기 파일에는 큰따옴표가 없고 ##는 있을 때도 없을 때도 있다
 
 
 def tidy(text):
@@ -145,23 +146,71 @@ def tidy(text):
     return re.sub(r"\n{3,}", "\n\n", _BR.sub("\n", text)).strip()
 
 
-def merge_tail(api_text, dl_text):
-    """API 글이 256자에서 잘렸으면, 내려받기 글의 나머지 부분을 이어 붙인다.
-    API 글(큰따옴표 포함)은 그대로 두고, 이어 붙인 뒷부분에는 큰따옴표·줄바꿈이 없다.
-    앞부분이 서로 맞지 않으면 합치지 않는다. 반환: (글, 합쳤는지)"""
-    if not api_text or not dl_text or len(api_text) < 255:
-        return api_text, False
-    want = _IGNORE.sub("", api_text)
-    seen = 0
-    for pos, ch in enumerate(dl_text):
+_CITE = re.compile(r"<[^<>]*(?:>|$)")    # 출전 표기 <고려사 세가 권36>: 내려받기 파일에는 빠져 있는 경우가 있다
+
+
+def _norm_map(text, strip_cite):
+    """공백·큰따옴표(·출전 꺾쇠 글)를 뺀 글자 열과, 각 글자가 원문 어디에 있었는지(index) 목록."""
+    if strip_cite:
+        text = _CITE.sub(lambda m: " " * len(m.group()), text)
+    chars, idx = [], []
+    for i, ch in enumerate(text):
         if not _IGNORE.match(ch):
-            if seen >= len(want) or ch != want[seen]:
-                if seen >= len(want):
-                    rest = dl_text[pos:].replace("\u00a0", " ")
-                    return (api_text + (" " if dl_text[pos - 1].isspace() else "") + rest.strip(), True) if rest.strip() else (api_text, False)
-                return api_text, False
-            seen += 1
-    return api_text, False
+            # 내려받기 파일은 옛한글을 호환 자모(ㆍ ㆁ)로 쓰고 API는 조합용 자모(ᆞ ᅌ)로 쓴다: 비교용으로 맞춘다
+            chars.append(unicodedata.normalize("NFKC", ch) if "\u3165" <= ch <= "\u318e" else ch)
+            idx.append(i)
+    return "".join(chars), idx
+
+
+def _archaic_jamo(text):
+    """내려받기 글의 옛한글 호환 자모(U+3165~318E)를 API와 같은 조합용 자모로. 현대 자모(ㅏ ㄱ …)는 그대로."""
+    return "".join(unicodedata.normalize("NFKC", c) if "\u3165" <= c <= "\u318e" else c for c in text)
+
+
+def merge_tail(api_text, dl_text):
+    """API는 문단(##으로 구분)마다 256자에서 자른다. 잘린 문단의 나머지를 내려받기 글에서 찾아 이어 붙인다.
+    API 글(큰따옴표·출전 꺾쇠 포함)은 그대로 두고, 이어 붙인 부분에는 큰따옴표·줄바꿈이 없다.
+    문단이 내려받기 글과 순서대로 맞지 않으면 합치지 않는다. 반환: (글, 합쳤는지)"""
+    if not api_text or not dl_text:
+        return api_text, False
+    paras = api_text.split("##")
+    if not any(len(p) >= 255 for p in paras):
+        return api_text, False
+    dl_norm, dl_idx = _norm_map(dl_text, False)
+    pos, out, changed = 0, [], False
+    for k, para in enumerate(paras):
+        for strip in (False, True):          # 출전 꺾쇠 글이 내려받기 파일에 있는 경우 / 없는 경우
+            norm, _ = _norm_map(para, strip)
+            if dl_norm.startswith(norm, pos):
+                break
+        else:
+            return api_text, False
+        end = pos + len(norm)
+        tail_end = end
+        if len(para) >= 255:                 # 이 문단이 잘렸을 수 있다
+            if k + 1 < len(paras):
+                nxt = None
+                for strip in (False, True):
+                    n2, _ = _norm_map(paras[k + 1], strip)
+                    if n2:
+                        j = dl_norm.find(n2[:15], end)
+                        if j >= 0 and (nxt is None or j < nxt):
+                            nxt = j
+                if nxt is None:
+                    return api_text, False
+                tail_end = nxt
+            else:
+                tail_end = len(dl_norm)
+        if tail_end > end:
+            start_i = dl_idx[end]
+            stop_i = dl_idx[tail_end] if tail_end < len(dl_idx) else len(dl_text)
+            tail = _archaic_jamo(dl_text[start_i:stop_i]).replace("\u00a0", " ").rstrip(" \n#")
+            if tail.strip():
+                para = para + (" " if start_i > 0 and dl_text[start_i - 1].isspace() and not tail[0].isspace() else "") + tail
+                changed = True
+        out.append(para)
+        pos = max(tail_end, end)
+    return "##".join(out), changed
 
 
 def opt(e, tag):

@@ -46,7 +46,7 @@ python3 urimal_lookup.py 고드름           # 표제어 조회 (--by hist|def|p
 
 - **Open API(`urimal_fetch.py`)**: 기본 원본. 다만 어휘 역사 설명·부가 정보·기타 정보를 256자에서 자르고, 표제어 8개는 내주지 않습니다.
 - **누리집 전체 내려받기(`urimal_import.py`)**: 검색 결과 화면의 '내려받기' → '전체 사전 내려받기'(XML, 매달 1회 생성). 전문이 들어 있고 표제어도 15,034개 전부지만, 큰따옴표(“ ”)가 빠지고 줄바꿈이 없으며 용례 강조(`<strong>`)가 없습니다.
-- **빌드(`urimal_build.py`)**: API를 기본으로 하고, 잘린 설명의 뒷부분과 API에 없는 표제어 8개만 내려받기 파일로 채웁니다. `entries.source`(`api`/`download`)와 `entries.merged_fields`로 어디서 왔는지 남깁니다. 이어 붙인 뒷부분에는 큰따옴표와 줄바꿈이 없습니다.
+- **빌드(`urimal_build.py`)**: API를 기본으로 하고, 잘린 설명의 뒷부분과 API에 없는 표제어 8개만 내려받기 파일로 채웁니다. `entries.source`(`api`/`download`)와 `entries.merged_fields`로 어디서 왔는지 남깁니다. 이어 붙인 뒷부분에는 큰따옴표와 줄바꿈이 없습니다. API는 문단(`##`)마다 256자에서 자르므로 문단별로 맞춰 이어 붙이며, 옛한글 자모 표기 차이(ㆍ/ᆞ)와 출전 꺾쇠 글(`<…>`) 유무를 보정합니다. 그래도 맞지 않는 23개 필드는 잘린 채 남습니다.
 
 ```
 python3 urimal_fetch.py fetch --range 1 20000
