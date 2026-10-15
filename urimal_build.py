@@ -306,7 +306,11 @@ def verify(db, raw):
     if db.execute("SELECT COUNT(*) FROM entries e WHERE NOT EXISTS (SELECT 1 FROM senses s WHERE s.target_code=e.target_code)").fetchone()[0]:
         errs.append("뜻풀이가 없는 표제어가 있습니다")
     if db.execute("SELECT COUNT(*) FROM (SELECT form, word_number FROM entries GROUP BY 1,2 HAVING COUNT(*)>1)").fetchone()[0]:
-        errs.append("(표제어, 어깨번호) 중복이 있습니다")
+        dup = [r[0] for r in db.execute(
+            "SELECT target_code FROM entries WHERE (form, word_number) IN "
+            "(SELECT form, word_number FROM entries GROUP BY 1,2 HAVING COUNT(*)>1) ORDER BY 1")]
+        # 정기 업데이트가 이 코드들만 다시 받아 한 번 더 빌드할 수 있게 코드 목록을 남긴다
+        errs.append("(표제어, 어깨번호) 중복이 있습니다 — 중복 코드: " + ",".join(str(c) for c in dup[:200]))
     if db.execute("SELECT COUNT(*) FROM examples WHERE example LIKE '%<strong>%' OR example LIKE '%<br%'").fetchone()[0]:
         errs.append("용례에 태그가 남아 있습니다")
     if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
