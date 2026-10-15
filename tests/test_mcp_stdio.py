@@ -28,8 +28,8 @@ def text(res):
 
 
 @contextlib.asynccontextmanager
-async def session():
-    params = StdioServerParameters(command=sys.executable, args=[SERVER])
+async def session(env=None):
+    params = StdioServerParameters(command=sys.executable, args=[SERVER], env={**os.environ, **(env or {})})
     with open(os.devnull, "w") as err:
         async with stdio_client(params, errlog=err) as (r, w):
             async with ClientSession(r, w) as s:
@@ -49,6 +49,38 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(set(tools), {"lookup_word", "search_dictionary"})
             by = tools["search_dictionary"].input_schema["properties"]["by"]
             self.assertEqual(set(by["enum"]), {"historical_form", "definition", "prefix"})
+
+    async def test_three_tiers_and_proportional_research_guidance(self):
+        async with session() as (s, init):
+            ins = init.instructions
+            for needle in ("(추론)", "[사전 외 설명]", "never invent", "bounded", "3 to 4", "no extra lookups",
+                           "offer", "do not start that search yet", "stop"):
+                self.assertIn(needle, ins, needle)
+            self.assertNotIn("without asking permission", ins)               # 먼저 제안하고 동의하면 탐색한다(2026-10-15)
+            tools = {t.name: t for t in (await s.list_tools()).tools}
+            self.assertIn("key phrases", tools["search_dictionary"].description)
+            notice = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0})).split("\n")[-1]
+            for needle in ("(추론)", "[사전 외 설명]"):
+                self.assertIn(needle, notice, needle)
+
+    async def test_notice_has_no_process_directives(self):
+        """도구 결과 안의 행동 지시(호출 횟수 등)는 Claude 가 주입으로 보고 따르지 않는다. 탐색 기준은 서버 지침·도구 설명에만."""
+        async with session() as (s, _):
+            notice = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0})).split("\n")[-1]
+            self.assertTrue(notice.startswith("[Note to assistant"))
+            for forbidden in ("extra lookups", "3-4", "extra calls", "proportionate", "stop once", "search wider"):
+                self.assertNotIn(forbidden, notice, forbidden)
+
+    async def test_notice_can_be_switched_off(self):
+        for value in ("0", "off", "false"):
+            async with session(env={"URIMAL_MCP_NOTICE": value}) as (s, init):
+                out = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0}))
+                self.assertNotIn("Note to assistant", out, value)
+                self.assertIn("고드름", out)
+                self.assertIn("(추론)", init.instructions)
+        async with session(env={"URIMAL_MCP_NOTICE": "1"}) as (s, _):
+            out = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0}))
+            self.assertIn("Note to assistant", out)
 
     async def test_lookup_word(self):
         async with session() as (s, _):

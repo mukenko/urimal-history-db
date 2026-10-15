@@ -42,11 +42,22 @@ INSTRUCTIONS = (
     "Old Hangul forms), the etymology/history notes, and dated usage examples with their sources. "
     "Use these tools to check the history, old spellings and etymology of a word instead of answering from memory. "
     "One spelling can have several homonyms (shown with a number, e.g. 예(1) 예(2)); read ALL of them and choose by context. "
-    "Quote dictionary facts exactly from the tool output and never invent or \"recall\" them: entries and homonym "
-    "numbers, old spellings and forms, dates, sources, examples and etymology notes. "
-    "Old Hangul letters (e.g. ᄀᆞ, ᅌ) must be copied exactly as shown. "
-    "You may add general explanation, background or advice beyond the entries, but put it in a separate part labeled "
-    "\"[사전 외 설명]\" so the user can tell it did not come from the dictionary. "
+    "Keep three tiers of your answer clearly apart. "
+    "(1) Dictionary facts: quote them exactly from the tool output and never invent or \"recall\" them: entries and "
+    "homonym numbers, old spellings and forms (Old Hangul letters, e.g. ᄀᆞ, ᅌ, must be copied exactly as shown), "
+    "dates, sources, examples and etymology notes. Never attach glosses, classifications or usage registers to a "
+    "word unless the tool output states them. "
+    "(2) \"(추론)\": your own comparison or judgement based on the listed entries. "
+    "(3) \"[사전 외 설명]\": general explanation, background or advice that is not based on the tool output, in a "
+    "separate part. "
+    "Match your research effort to the question and keep the user in control of how long it takes. A simple check "
+    "(an old spelling, one word's history) needs no extra lookups. For broader questions (related words, comparing "
+    "the histories of several words), first report what the entries themselves list, then offer in one line what you "
+    "could look up next (definition or prefix searches with different key phrases, related headwords); do not start "
+    "that search yet. When the user agrees, or asks from the start for a broad or thorough search (e.g. \"더 찾아줘\", "
+    "\"자세히\"), do a bounded search of about 3 to 4 extra tool calls: one or two definition or prefix searches and "
+    "lookups of the two or three most promising headwords. Mark your own comparison as \"(추론)\"; then stop and say "
+    "what you did not cover. Go wider only when the user asks. "
     "Some long notes may be cut off in the source data, and text appended from the bulk download lacks double quotes. "
     "If a tool says a word is not an entry, say so; do not invent dictionary content. "
     "Answer in the user's language (Korean unless the user writes otherwise) and mention that the source is the "
@@ -54,10 +65,21 @@ INSTRUCTIONS = (
 )
 
 # 모든 조회 결과 끝에 붙이는 알림. 모델에 대한 부탁이며 강제는 아니다.
-NOTICE = ("[Note to assistant: quote the entries above exactly and never invent old spellings, dates, sources or "
-          "examples; copy Old Hangul exactly. General explanation beyond the entries is welcome only in a separate part "
-          "labeled \"[사전 외 설명]\". State that the source is the Historical Korean Vocabulary Dictionary "
-          "(우리말역사어휘사전).]")
+# 인용·표시 방법만 담는다. 탐색 횟수 같은 행동 지시는 도구 결과 안에 넣지 않는다(Claude 가 프롬프트 주입으로 보고 따르지 않고
+# 매번 사용자에게 알린다, 2026-10-15). 그런 기준은 서버 지침(INSTRUCTIONS)과 도구 설명에만 둔다.
+# 서버 지침을 읽는 클라이언트(Claude 등)에는 환경변수 URIMAL_MCP_NOTICE=0 으로 알림을 끌 수 있다.
+NOTICE = ("[Note to assistant: quote dictionary facts exactly and never invent them or attach labels, glosses or "
+          "registers the output does not state; copy Old Hangul exactly. Mark your own judgement as \"(추론)\" and "
+          "anything beyond the tool output as \"[사전 외 설명]\". State that the source is the Historical Korean "
+          "Vocabulary Dictionary (우리말역사어휘사전).]")
+
+
+def _notice_tail():
+    """결과 끝에 붙일 알림(줄바꿈 포함). URIMAL_MCP_NOTICE 가 0/off/false/no 면 붙이지 않는다."""
+    if os.environ.get("URIMAL_MCP_NOTICE", "1").strip().lower() in ("0", "off", "false", "no"):
+        return ""
+    return "\n" + NOTICE
+
 
 BY_MAP = {"historical_form": "hist", "definition": "def", "prefix": "prefix"}
 
@@ -103,7 +125,7 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     Args: word = the Korean word (modern or old spelling), e.g. "고드름"; max_entries = how many homonyms to show
     (default 8); examples_per_century = usage examples shown per century and spelling (default 1, 0 = none, max 5)."""
     n = max(0, min(int(examples_per_century), 5))
-    return _run("form", word, n, 30, max(1, min(int(max_entries), 20))) + "\n" + NOTICE
+    return _run("form", word, n, 30, max(1, min(int(max_entries), 20))) + _notice_tail()
 
 
 @_safe
@@ -112,10 +134,11 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     by="historical_form": find modern words that were once written with the given OLD spelling, e.g. "곳어름" or "ᄀᆞᆺ".
     by="definition": find words whose definition contains the phrase (any length; 3+ characters use a fast index).
     by="prefix": list entries whose headword starts with the text, e.g. "고드".
+    To find related words, vary the query: use key phrases taken from a definition; a few calls are enough.
     A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use lookup_word
     with a listed headword to see one entry in full.
     Args: query = the text to search; by = the search kind above; limit = maximum results (default 10, max 50)."""
-    return _run(BY_MAP[by], query, 1, max(1, min(int(limit), 50))) + "\n" + NOTICE
+    return _run(BY_MAP[by], query, 1, max(1, min(int(limit), 50))) + _notice_tail()
 
 
 TOOLS = (lookup_word, search_dictionary)
