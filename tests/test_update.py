@@ -253,5 +253,146 @@ class BuildDuplicateRetry(DbCase):
         self.assertEqual(client.requested, [])
 
 
+
+# ---------------------------------------------------------------- 마지막 실행 결과 기록 (--status)
+import argparse  # noqa: E402
+import contextlib  # noqa: E402
+import io  # noqa: E402
+
+
+class RunStatus(DbCase):
+    """run() 이 마지막 실행의 시작·종료·결과·요약을 sync_meta 에 남기고, --status 가 맨 위에 보여 준다."""
+
+    def setUp(self):
+        super().setUp()
+        self.notices = []
+        for name, val in (("notify", lambda title, text: self.notices.append((title, text))),
+                          ("run_build", lambda: (0, "완료"))):
+            old = getattr(uu, name)
+            setattr(uu, name, val)
+            self.addCleanup(setattr, uu, name, old)
+        self.seed(10, "예", 1)
+        self.seed(20, "눈", 1)
+        self.server = {10: entry_xml(10, "예", 1), 20: entry_xml(20, "눈", 1)}
+
+    def args(self, steps="oldest", **kw):
+        d = dict(steps=steps, dry_run=False, oldest_n=10, limit=1000, sleep=0, force_download=False, force_build=False)
+        d.update(kw)
+        return argparse.Namespace(**d)
+
+    def meta(self):
+        return dict(self.db.execute("SELECT key, value FROM sync_meta WHERE key LIKE 'update_%'"))
+
+    def run_with(self, server=None, client=None, **kw):
+        client = client or FakeClient(self.db, self.server if server is None else server)
+        return uu.run(self.args(**kw), client=client)
+
+    def test_unchanged_run_is_ok_and_skips_build(self):
+        result = self.run_with(steps="oldest,build")
+        self.assertEqual(result, "ok")
+        m = self.meta()
+        self.assertEqual(m["update_last_result"], "ok")
+        self.assertTrue(m["update_last_start"] and m["update_last_end"])
+        self.assertIn("빌드 안 함", m["update_last_summary"])
+        self.assertIn("변경 없음", m["update_last_summary"])
+
+    def test_changed_run_builds_and_summarises(self):
+        self.server[10] = entry_xml(10, "예", 1, "<sense_info>달라짐</sense_info>")
+        result = self.run_with(steps="oldest,build")
+        self.assertEqual(result, "ok")
+        summary = self.meta()["update_last_summary"]
+        self.assertIn("changed 1", summary)
+        self.assertIn("빌드 했음", summary)
+        self.assertIn("호출", summary)
+
+    def test_build_failure_is_failed_and_notified(self):
+        self.server[10] = entry_xml(10, "예", 1, "<sense_info>달라짐</sense_info>")
+        uu.run_build = lambda: (1, "integrity_check 실패")
+        result = self.run_with(steps="oldest,build")
+        self.assertEqual(result, "failed")
+        self.assertEqual(self.meta()["update_last_result"], "failed")
+        self.assertIn("build", self.meta()["update_last_summary"])
+        self.assertTrue(self.notices)
+        self.assertIn("실패", self.notices[0][0])
+
+    def test_call_limit_is_incomplete(self):
+        class LimitClient(FakeClient):
+            def call(self, path, params):
+                if self.requested:
+                    raise uf.LimitReached()
+                return super().call(path, params)
+        result = self.run_with(client=LimitClient(self.db, self.server), steps="oldest")
+        self.assertEqual(result, "incomplete")
+        self.assertEqual(self.meta()["update_last_result"], "incomplete")
+        self.assertIn("oldest", self.meta()["update_last_summary"])
+
+    def test_start_is_recorded_as_running_before_the_work(self):
+        seen = {}
+
+        class SpyClient(FakeClient):
+            def call(inner, path, params):
+                seen.update(self.meta())
+                return super().call(path, params)
+        self.run_with(client=SpyClient(self.db, self.server), steps="oldest")
+        self.assertEqual(seen.get("update_last_result"), "running")
+
+    def test_interrupt_is_recorded(self):
+        class Boom(FakeClient):
+            def call(self, path, params):
+                raise KeyboardInterrupt()
+        with self.assertRaises(SystemExit) as cm:
+            uu.run_guarded(self.args(), client=Boom(self.db, self.server))
+        self.assertEqual(cm.exception.code, 130)
+        self.assertEqual(self.meta()["update_last_result"], "interrupted")
+
+    def test_failed_run_exits_with_code_1(self):
+        self.server[10] = entry_xml(10, "예", 1, "<sense_info>달라짐</sense_info>")
+        uu.run_build = lambda: (1, "integrity_check 실패")
+        with self.assertRaises(SystemExit) as cm:
+            uu.run_guarded(self.args(steps="oldest,build"), client=FakeClient(self.db, self.server))
+        self.assertEqual(cm.exception.code, 1)
+
+    def test_ok_run_does_not_exit(self):
+        self.assertEqual(uu.run_guarded(self.args(), client=FakeClient(self.db, self.server)), "ok")
+
+    def test_status_prints_the_last_run_first(self):
+        self.run_with(steps="oldest")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            uu.status()
+        lines = out.getvalue().splitlines()
+        self.assertTrue(lines[0].startswith("last_start: "))
+        self.assertTrue(lines[1].startswith("last_end: "))
+        self.assertEqual(lines[2], "last_result: ok")
+        self.assertTrue(lines[3].startswith("last_summary: "))
+
+    def test_status_without_any_run(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            uu.status()
+        text = out.getvalue()
+        self.assertIn("last_result: (없음)", text)
+        self.assertIn("가져온 내려받기 파일 생성일", text)           # 기존 출력은 그대로
+
+
+class Summary(unittest.TestCase):
+    def test_summary_text(self):
+        t = uu.format_summary({"changed": 2, "same": 50, "added": 1, "pending": 3}, pending=4, built=True,
+                              incomplete=[], failed=[], used=120, limit=20000)
+        self.assertIn("added 1", t)
+        self.assertIn("changed 2", t)
+        self.assertNotIn("same", t)                                  # 변화 없음은 변경이 아니다
+        self.assertIn("삭제 대기 4", t)
+        self.assertIn("빌드 했음", t)
+        self.assertIn("120/20000", t)
+
+    def test_summary_when_nothing_changed(self):
+        t = uu.format_summary({"same": 9}, pending=0, built=False, incomplete=["download"], failed=["build"], used=1, limit=2)
+        self.assertIn("변경 없음", t)
+        self.assertIn("빌드 안 함", t)
+        self.assertIn("download", t)
+        self.assertIn("build", t)
+
+
 if __name__ == "__main__":
     unittest.main()

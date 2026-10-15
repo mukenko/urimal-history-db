@@ -62,7 +62,7 @@ python3 urimal_mcp.py --call lookup_word 고드름        # SDK 없이 도구 �
 ```
 python3 urimal_update.py --dry-run     # 할 일만 보기
 python3 urimal_update.py               # 오늘 할 일 전체
-python3 urimal_update.py --status      # 마지막 결과·변경 기록·로그
+python3 urimal_update.py --status      # 마지막 실행 결과(ok/incomplete/failed)·변경 기록·로그
 ```
 
 이 사전의 API에는 '고친 날짜' 검색이 없어서 변경은 다시 받아 비교합니다.
@@ -70,7 +70,8 @@ python3 urimal_update.py --status      # 마지막 결과·변경 기록·로그
 - **동형이의어 번호 보호:** 새 표제어가 생기거나 항목의 표제어·어깨번호가 바뀌면, 같은 표제어의 다른 항목(최대 10개 안팎)을 같은 실행에서 바로 다시 받습니다. 사전이 번호를 밀면 옛 번호의 항목이 며칠 남아 빌드 검증("(표제어, 어깨번호) 중복")이 실패하는 것을 막기 위해서입니다. 그래도 중복으로 빌드가 실패하면 빌드가 알려 준 중복 코드만 다시 받아 **한 번만** 다시 빌드합니다.
 - **삭제는 이틀에 걸쳐 확정:** 이전에 있던 코드가 비어 오면 같은 날에는 `fetch_state.note`에 `empty@날짜`로 표시만 하고, **다른 날** 또 비어 오면 삭제로 확정합니다(일시적인 빈 응답이 같은 순간에 되풀이될 수 있어서). 원본은 `raw_removed`에 남깁니다.
 하루 API 호출은 20,000건까지(한도 50,000건)입니다.
-로그는 `data/update.log`(15일 지난 줄은 자동 삭제). 새 표제어·삭제 확정이 있으면 macOS 알림을 띄웁니다.
+로그는 `data/update.log`(15일 지난 줄은 자동 삭제). 새 표제어·삭제 확정이 있으면, 실패(빌드 실패)하면 macOS 알림을 띄웁니다.
+마지막 실행의 시작·종료 시각, 결과(`ok`/`incomplete`/`failed`/`interrupted`), 요약은 원본 DB의 `sync_meta`에 남고 `--status` 맨 위에 보입니다(stdict-db와 같은 형태). 실패하면 종료 코드 1, 중단하면 130입니다.
 매일 실행은 launchd로 합니다: `com.lexlabs.urimalupdate.plist`(08:45)를 `~/Library/LaunchAgents/`에 복사하고
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.lexlabs.urimalupdate.plist`.
 

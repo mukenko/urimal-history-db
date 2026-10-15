@@ -35,6 +35,7 @@ import fcntl
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -181,6 +182,7 @@ def open_db():
             at TEXT NOT NULL, target_code INTEGER NOT NULL,
             kind TEXT NOT NULL,                  -- added | changed | removed
             form TEXT);
+        CREATE TABLE IF NOT EXISTS sync_meta(key TEXT PRIMARY KEY, value TEXT);   -- 마지막 실행 결과 등
         CREATE TABLE IF NOT EXISTS raw_removed(  -- 삭제 확정된 원본(되돌릴 수 있게 남김)
             target_code INTEGER PRIMARY KEY, removed_at TEXT NOT NULL, xml BLOB NOT NULL);
         """)
@@ -199,6 +201,19 @@ def item_text(xml):
 def form_of(xml):
     m = re.search(r"<form>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</form>", xml)
     return m.group(1) if m else None
+
+
+def meta_write(db, **kv):
+    """마지막 실행 정보를 sync_meta 에 update_<이름> 키로 남긴다(stdict-db 와 같은 방식)."""
+    for k, v in kv.items():
+        db.execute("INSERT OR REPLACE INTO sync_meta(key, value) VALUES(?,?)", (f"update_{k}", str(v)))
+    db.commit()
+
+
+def format_summary(counts, pending, built, incomplete, failed, used, limit):
+    changes = ", ".join(f"{k} {counts[k]}" for k in ("added", "changed", "removed") if counts.get(k)) or "없음"
+    return (f"변경 {changes}, 삭제 대기 {pending}, 빌드 {'했음' if built else '안 함'}, "
+            f"미완료 단계 {incomplete or '없음'}, 실패 {failed or '없음'}, 오늘 호출 {used}/{limit}")
 
 
 def number_of(xml):
@@ -473,15 +488,17 @@ def codes_oldest(db, n):
 
 
 # ---------------------------------------------------------------- 실행
-def run(args):
+def run(args, client=None):
+    """한 번의 정기 업데이트. 결과 'ok' | 'incomplete' | 'failed' 를 돌려주고 sync_meta 에 남긴다(dry-run 은 None)."""
     steps = [s for s in (args.steps.split(",") if args.steps else ALL_STEPS) if s]
     bad = [s for s in steps if s not in ALL_STEPS]
     if bad:
         sys.exit(f"알 수 없는 단계: {', '.join(bad)} (가능: {', '.join(ALL_STEPS)})")
-    db = open_db()
-    client = uf.Client(uf.load_key(), db, args.limit, args.sleep)
+    db = client.db if client else open_db()
+    client = client or uf.Client(uf.load_key(), db, args.limit, args.sleep)
     counts_total = {}
     changed = False
+    incomplete, failed = [], []
 
     if args.dry_run:
         log(f"[dry-run] 단계: {', '.join(steps)} / 오늘 호출 {client.used_today()}/{client.limit}")
@@ -499,11 +516,13 @@ def run(args):
         return
 
     log(f"시작: 단계 {', '.join(steps)} / 오늘 호출 {client.used_today()}/{client.limit}")
+    meta_write(db, last_start=uf.now(), last_result="running")
     if "download" in steps:
         try:
             changed |= step_download(db, force=args.force_download)
         except (urllib.error.URLError, OSError, ValueError, zipfile.BadZipFile, ET.ParseError) as e:
             log(f"download: 실패 ({type(e).__name__}: {str(e)[:150]}) - 다음 실행에서 다시 시도합니다.")
+            incomplete.append("download")
     ok = True
     done, regroup = set(), set()                  # 이번 실행에서 받은 코드 / 번호가 밀렸을 수 있는 표제어
     counts_group = Counter()
@@ -515,12 +534,16 @@ def run(args):
         counts = Counter()
         ok = run_refresh(client, getter(), name, counts, previously_ok=prev_ok, done=done, regroup=regroup)
         db.commit()
+        if not ok:
+            incomplete.append(name)
         log(f"{name}: " + (", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "처리한 코드 없음"))
         for k, v in counts.items():
             counts_total[k] = counts_total.get(k, 0) + v
     if ok and regroup:
         ok = refresh_groups(client, regroup, done, counts_group)
         db.commit()
+        if not ok:
+            incomplete.append("group")
         log("group: " + (", ".join(f"{k} {v}" for k, v in sorted(counts_group.items())) or "처리한 코드 없음"))
         for k, v in counts_group.items():
             counts_total[k] = counts_total.get(k, 0) + v
@@ -529,16 +552,51 @@ def run(args):
 
     if n_added or n_removed:
         notify("우리말역사어휘사전", f"새 표제어 {n_added}개, 삭제 {n_removed}개")
+    built = False
     if "build" in steps:
         if changed or args.force_build:
-            build_with_retry(client, run_build)
+            built = build_with_retry(client, run_build)
+            if not built:
+                failed.append("build")
         else:
             log("build: 바뀐 것이 없어 건너뜀")
-    log(f"끝: 오늘 호출 {client.used_today()}/{client.limit}")
+    used = client.used_today()
+    log(f"끝: 오늘 호출 {used}/{client.limit}")
+    result = "failed" if failed else ("incomplete" if incomplete else "ok")
+    pending = db.execute("SELECT COUNT(*) FROM fetch_state WHERE note LIKE 'empty@%'").fetchone()[0]
+    meta_write(db, last_end=uf.now(), last_result=result,
+               last_summary=format_summary(counts_total, pending, built, incomplete, failed, used, client.limit))
+    if failed:
+        notify("우리말역사어휘사전 업데이트 실패", ", ".join(failed)[:150])
+    return result
+
+
+def run_guarded(args, client=None):
+    """run() 을 부르고 중단(Ctrl+C·SIGTERM)과 실패를 종료 코드로 알린다: 실패 1, 중단 130."""
+    signal.signal(signal.SIGTERM, _on_term)                   # launchd 가 멈출 때도 기록을 남기고 잠금을 정리한다
+    try:
+        result = run(args, client=client)
+    except KeyboardInterrupt:
+        log("중단 요청을 받았습니다")
+        if not args.dry_run:
+            db = client.db if client else open_db()
+            meta_write(db, last_end=uf.now(), last_result="interrupted")
+        sys.exit(130)
+    if result == "failed":
+        sys.exit(1)
+    return result
+
+
+def _on_term(signum, frame):
+    raise KeyboardInterrupt()
 
 
 def status():
     db = open_db()
+    meta = dict(db.execute("SELECT key, value FROM sync_meta WHERE key LIKE 'update_%'").fetchall())
+    for k in ("last_start", "last_end", "last_result", "last_summary"):
+        print(f"{k}: {meta.get('update_' + k, '(없음)')}")
+    print()
     print(f"가져온 내려받기 파일 생성일: {imported_created(db) or '없음'}")
     for row in db.execute("SELECT status, COUNT(*) FROM fetch_state GROUP BY status"):
         print(f"  {row[0]:<6} {row[1]}")
@@ -586,7 +644,7 @@ def main():
             except LockBusy:
                 log("동기화 작업이 오래 끝나지 않아 이번 실행은 건너뜁니다.")
                 return
-        run(args)
+        run_guarded(args)
     finally:
         if locked:
             release_rsync_lock()
