@@ -29,11 +29,13 @@ import sys
 from pathlib import Path
 from typing import Literal
 
+import urimal_html as uh
 import urimal_lookup as ul
 
 SERVER_NAME = "urimal-history"
 HTTP_HOST = "127.0.0.1"                 # 바인드 주소는 고정한다(외부에 직접 열지 않는다)
 HTTP_DEFAULT_PORT = 8767
+HTTP_MODE = False                       # --http 로 띄우면 True(원격 서버는 사용자 화면에서 브라우저를 열 수 없다)
 TOKEN_FILE = Path(os.environ.get("URIMAL_MCP_TOKEN_FILE") or Path.home() / ".config" / "urimal-mcp" / "token")
 
 INSTRUCTIONS = (
@@ -58,6 +60,10 @@ INSTRUCTIONS = (
     "\"자세히\"), do a bounded search of about 3 to 4 extra tool calls: one or two definition or prefix searches and "
     "lookups of the two or three most promising headwords. Mark your own comparison as \"(추론)\"; then stop and say "
     "what you did not cover. Go wider only when the user asks. "
+    "Old Hangul and some Hanja may display wrongly in a chat window (blank boxes, split letters, other glyph forms) "
+    "because the app has no suitable fonts. When your answer contains Old Hangul, end it with one line offering to "
+    "open the exact letters in the user's browser with the open_in_browser tool; call that tool only after the user "
+    "agrees or asks to see the exact letters. Do not retype Old Hangul into an artifact for this purpose. "
     "Some long notes may be cut off in the source data, and text appended from the bulk download lacks double quotes. "
     "If a tool says a word is not an entry, say so; do not invent dictionary content. "
     "Answer in the user's language (Korean unless the user writes otherwise) and mention that the source is the "
@@ -74,6 +80,9 @@ NOTICE = ("[Note to assistant: quote dictionary facts exactly and never invent t
           "Vocabulary Dictionary (우리말역사어휘사전).]")
 
 
+ATTRIBUTION = "출처: 국립국어원 우리말역사어휘사전 (CC BY-SA 2.0 KR)"
+
+
 def _notice_tail():
     """결과 끝에 붙일 알림(줄바꿈 포함). URIMAL_MCP_NOTICE 가 0/off/false/no 면 붙이지 않는다."""
     if os.environ.get("URIMAL_MCP_NOTICE", "1").strip().lower() in ("0", "off", "false", "no"):
@@ -84,21 +93,25 @@ def _notice_tail():
 BY_MAP = {"historical_form": "hist", "definition": "def", "prefix": "prefix"}
 
 
-def _run(by, q, examples, limit, max_entries=None):
-    """조회 코어는 stdout 으로 출력하므로 그 출력을 모아 문자열로 돌려준다(프로토콜 stdout 은 건드리지 않는다)."""
+def _query_text(by, q, examples, limit, max_entries=None):
+    """조회 코어는 stdout 으로 출력하므로 그 출력을 모아 (찾았는지, 문자열)로 돌려준다(프로토콜 stdout 은 건드리지 않는다)."""
     buf = io.StringIO()
     try:
         db = ul.connect()
     except SystemExit:
-        return "The dictionary database is not available. Build it with: python3 urimal_build.py"
+        return False, "The dictionary database is not available. Build it with: python3 urimal_build.py"
     try:
         with contextlib.redirect_stdout(buf):
             ul.query(db, by, q, examples, limit, max_entries)
     except ul.Miss as e:
-        return str(e)
+        return False, str(e)
     finally:
         db.close()
-    return buf.getvalue().strip()
+    return True, buf.getvalue().strip()
+
+
+def _run(by, q, examples, limit, max_entries=None):
+    return _query_text(by, q, examples, limit, max_entries)[1]
 
 
 def _safe(fn):
@@ -122,10 +135,15 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     academic references. If the word is not an entry but appears as an OLD spelling of an entry (e.g. 곳어름 -> 고드름),
     that entry is shown; otherwise entries starting with the text are listed.
     Hyphens typed by the user are handled; do not add them yourself.
+    Anything that explains WHY or HOW beyond what this tool returns (for example why a letter or sound changed,
+    historical-linguistics background, usage advice) is not dictionary content: put it in a separate part labeled
+    "[사전 외 설명]". End the answer with the source line.
     Args: word = the Korean word (modern or old spelling), e.g. "고드름"; max_entries = how many homonyms to show
-    (default 8); examples_per_century = usage examples shown per century and spelling (default 1, 0 = none, max 5)."""
+    (default 8); examples_per_century = usage examples shown per century and spelling (default 1, 0 = none, max 5).
+    With the default, each century says how many more examples exist ("4개 중 1개 표시, 3개 더 있음") and a total line
+    follows; tell the user so. To see more of them, raise examples_per_century (max 5); open_in_browser shows all."""
     n = max(0, min(int(examples_per_century), 5))
-    return _run("form", word, n, 30, max(1, min(int(max_entries), 20))) + _notice_tail()
+    return _run("form", word, n, 30, max(1, min(int(max_entries), 20))) + "\n" + ATTRIBUTION + _notice_tail()
 
 
 @_safe
@@ -137,11 +155,32 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     To find related words, vary the query: use key phrases taken from a definition; a few calls are enough.
     A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use lookup_word
     with a listed headword to see one entry in full.
+    Explanations beyond the returned entries belong in a separate part labeled "[사전 외 설명]"; end the answer
+    with the source line.
     Args: query = the text to search; by = the search kind above; limit = maximum results (default 10, max 50)."""
-    return _run(BY_MAP[by], query, 1, max(1, min(int(limit), 50))) + _notice_tail()
+    return _run(BY_MAP[by], query, 1, max(1, min(int(limit), 50))) + "\n" + ATTRIBUTION + _notice_tail()
 
 
-TOOLS = (lookup_word, search_dictionary)
+@_safe
+def open_in_browser(word: str, max_entries: int = 8, examples: str = "all") -> str:
+    """Open the lookup result for a word in the user's web browser as an HTML page whose fonts display Old Hangul and
+    the Korean glyph forms of Hanja correctly (chat windows often cannot). It opens a window on the user's computer, so
+    call it ONLY when the user asks to see the exact letters, says the letters look broken, or agrees to your offer.
+    The page contains the same text as lookup_word, copied exactly. Only a local server can do this; a remote one cannot.
+    Args: word = the Korean word (modern or old spelling), e.g. "고래"; max_entries = how many homonyms to show
+    (default 8); examples = usage examples per century and spelling: a number or "all" (default "all")."""
+    if HTTP_MODE:
+        return ("This is a remote server and cannot open a browser on your computer. "
+                "On your own computer run: python3 urimal_lookup.py <word> --html")
+    n = "all" if str(examples).strip().lower() == "all" else max(0, min(int(examples), 30))
+    found, text = _query_text("form", word, n, 30, max(1, min(int(max_entries), 20)))
+    if not found:
+        return text
+    path, opened = uh.save_html(text, word, open_it=True)
+    return f"브라우저로 열었습니다: {path}" if opened else f"HTML 파일을 만들었지만 브라우저를 열지 못했습니다. 직접 여세요: {path}"
+
+
+TOOLS = (lookup_word, search_dictionary, open_in_browser)
 
 
 def _check_db():
@@ -243,6 +282,8 @@ def main():
             from mcp.server.fastmcp import FastMCP               # mcp 1.x
         except ImportError:
             sys.exit("MCP SDK가 없습니다. 저장소의 .venv 로 실행하세요: .venv/bin/python urimal_mcp.py")
+    global HTTP_MODE
+    HTTP_MODE = bool(args.http)
     token = _load_token() if args.http else None               # 토큰 문제는 DB 보다 먼저 알려 준다
     n = _check_db()
     server = FastMCP(SERVER_NAME, instructions=INSTRUCTIONS)

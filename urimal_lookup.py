@@ -7,11 +7,14 @@
   python3 urimal_lookup.py 고드 --by prefix       # 표제어 앞부분 일치 목록
   python3 urimal_lookup.py --code 4548            # 코드로 조회
   python3 urimal_lookup.py 고드름 --examples 0    # 용례를 빼고 보기 (기본: 세기마다 2개, --examples all 은 전부)
+  python3 urimal_lookup.py 고래 --examples all --html   # 글꼴을 지정한 HTML 로 만들어 브라우저로 열기(옛한글·한자 자형이 누리집처럼 나옴)
 
 표제어의 하이픈(가-건물)은 검색어에 넣지 않아도 됩니다.
 주의: API가 어휘 역사 설명·부가 정보·기타 정보를 256자에서 잘라 보내므로, 긴 설명은 끝이 잘려 있을 수 있습니다.
 """
 import argparse
+import contextlib
+import io
 import os
 import sqlite3
 import sys
@@ -112,6 +115,7 @@ def show_entry(db, code, n_examples):
 
 def show_examples(db, code, n):
     groups = db.execute("SELECT idx, definition FROM hist_groups WHERE target_code=? ORDER BY idx", (code,)).fetchall()
+    total_all = shown_all = 0
     for g in groups:
         if g["definition"]:
             print(f"  [용례: {g['definition']}]")
@@ -126,7 +130,9 @@ def show_examples(db, code, n):
                 sql += " LIMIT ?"
                 args.append(n)
             rows = db.execute(sql, args).fetchall()
-            shown = f"{total}개 중 {len(rows)}개" if total > len(rows) else f"{total}개"
+            total_all += total
+            shown_all += len(rows)
+            shown = f"{total}개 중 {len(rows)}개 표시, {total - len(rows)}개 더 있음" if total > len(rows) else f"{total}개"
             print(f"    {c['century']} {c['form']} ({shown})")
             for r in rows:
                 print(f"      · {r['example'].replace(chr(10), ' ')}  <{r['source']}>")
@@ -134,6 +140,8 @@ def show_examples(db, code, n):
                     print(f"        원문: {r['original'].replace(chr(10), ' ')}")
                 if r["translation"]:
                     print(f"        번역: {r['translation'].replace(chr(10), ' ')}")
+    if total_all > shown_all:                                  # 사실 한 줄: 모델이 사용자에게 '더 있음'을 알릴 수 있게
+        print(f"    용례 합계: {total_all}개 중 {shown_all}개 표시, {total_all - shown_all}개 더 있음")
 
 
 def show_list(db, codes, q=None):
@@ -198,22 +206,40 @@ def main():
     ap.add_argument("--code", type=int, help="target_code 로 조회")
     ap.add_argument("--examples", default="2", help="세기별 용례 수: 0 | 숫자 | all (기본 2)")
     ap.add_argument("--limit", type=int, default=50, help="목록 최대 개수 (기본 50)")
+    ap.add_argument("--html", action="store_true",
+                    help="결과를 글꼴이 지정된 HTML 로 만들어 연다(옛한글·한자 자형 표시용, ~/.cache/urimal-db/html, 하루 지난 파일은 자동 삭제)")
+    ap.add_argument("--no-open", action="store_true", help="--html 로 파일만 만들고 브라우저로 열지 않는다")
     args = ap.parse_args()
+    if args.no_open and not args.html:
+        ap.error("--no-open 은 --html 과 함께 쓰세요")
     if args.examples != "all":
         try:
             args.examples = int(args.examples)
         except ValueError:
             ap.error("--examples 는 0, 숫자, all 중 하나")
     db = connect()
-    if args.code:
-        show_entry(db, args.code, args.examples)
-        return
-    if not args.query:
+    if not args.code and not args.query:
         ap.error("검색어나 --code 가 필요합니다")
+    buf = io.StringIO()
     try:
-        query(db, args.by, args.query, args.examples, args.limit)
+        with contextlib.redirect_stdout(buf) if args.html else contextlib.nullcontext():
+            if args.code:
+                show_entry(db, args.code, args.examples)
+            else:
+                query(db, args.by, args.query, args.examples, args.limit)
     except Miss as e:
         sys.exit(str(e))
+    if args.html:
+        write_html(buf.getvalue(), str(args.code or args.query), open_it=not args.no_open)
+
+
+def write_html(text, label, open_it):
+    """조회 결과 text 를 HTML 로 저장하고(필요하면 브라우저로 연다) 위치를 알려 준다."""
+    import urimal_html as uh
+    path, opened = uh.save_html(text, label, open_it)
+    print(f"HTML 저장: {path}")
+    if open_it and not opened:
+        print("브라우저를 열지 못했습니다. 위 파일을 직접 여세요.")
 
 
 if __name__ == "__main__":

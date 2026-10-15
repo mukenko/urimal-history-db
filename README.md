@@ -36,6 +36,7 @@ python3 urimal_fetch.py fetch --range 1 20000
 python3 urimal_fetch.py status
 python3 urimal_build.py
 python3 urimal_lookup.py 고드름           # 표제어 조회 (--by hist|def|prefix, --code, --examples)
+python3 urimal_lookup.py 고래 --examples all --html   # 글꼴을 지정한 HTML 로 만들어 브라우저로 열기(--no-open 은 파일만)
 ```
 
 ## 데이터 출처
@@ -94,3 +95,15 @@ python3 urimal_fetch.py fetch --range 1 20000
 python3 urimal_import.py data/download/full_20261001.zip
 python3 urimal_build.py
 ```
+
+## 옛한글·한자가 깨져 보일 때
+
+용례의 옛한글은 표준 유니코드 조합 자모(ᄒ+ᆞ, ᄯ, ᇰ …)라 데이터는 정상이지만, 채팅 앱(Claude 앱 등)은 시스템 글꼴 폴백으로 그려서 빈 칸(▒)이나 갈라진 글자로 보이고
+한자도 다른 지역 자형으로 보일 수 있습니다. 정확히 보려면 `--html`(위)로 글꼴이 지정된 HTML을 만들어 여세요. `lang="ko"`와 **나눔바른고딕 옛한글판**을 지정해서 누리집처럼 나옵니다. 글꼴 파일(`~/Library/Fonts/NanumBarunGothic-YetHangul.otf`)이 있으면 HTML 안에 웹 글꼴로
+**직접 넣습니다**(약 4MB; Safari는 웹 페이지가 사용자가 설치한 글꼴을 쓰지 못하게 막아 설치만으로는 옛한글이 깨집니다, Chrome은 설치된 글꼴을 그대로 씀). 파일이 없으면 설치된
+글꼴 이름(바른고딕 → 나눔명조 옛한글판)으로 예비 처리합니다. `URIMAL_HTML_EMBED_FONT=0` 이면 내장하지 않습니다.
+파일은 `~/.cache/urimal-db/html/`(환경변수 `URIMAL_HTML_DIR`)에 검색어별로 하나씩 만들어지고 하루 지난 것은 자동으로 지웁니다.
+
+**채팅에서 바로 열기:** MCP 서버(이 맥에서 도는 stdio)에는 `open_in_browser` 도구가 있어서, 옛한글이 든 답변 끝에 "정확한 글자로 브라우저에 열어 드릴까요?"라고 제안하고
+사용자가 동의하거나 요청하면 같은 HTML을 만들어 기본 브라우저로 엽니다(모델은 도구를 한 번 부를 뿐 글자를 다시 쓰지 않습니다). 원격(`--http`) 서버는 사용자 화면을 열 수 없어 거절합니다.
+`URIMAL_HTML_OPEN=0` 이면 파일만 만들고 열지 않습니다.
