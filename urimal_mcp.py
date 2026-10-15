@@ -42,8 +42,11 @@ INSTRUCTIONS = (
     "Old Hangul forms), the etymology/history notes, and dated usage examples with their sources. "
     "Use these tools to check the history, old spellings and etymology of a word instead of answering from memory. "
     "One spelling can have several homonyms (shown with a number, e.g. 예(1) 예(2)); read ALL of them and choose by context. "
-    "Base your answer ONLY on the tool output: do not add entries, old forms, dates, sources or examples from memory. "
+    "Quote dictionary facts exactly from the tool output and never invent or \"recall\" them: entries and homonym "
+    "numbers, old spellings and forms, dates, sources, examples and etymology notes. "
     "Old Hangul letters (e.g. ᄀᆞ, ᅌ) must be copied exactly as shown. "
+    "You may add general explanation, background or advice beyond the entries, but put it in a separate part labeled "
+    "\"[사전 외 설명]\" so the user can tell it did not come from the dictionary. "
     "Some long notes may be cut off in the source data, and text appended from the bulk download lacks double quotes. "
     "If a tool says a word is not an entry, say so; do not invent dictionary content. "
     "Answer in the user's language (Korean unless the user writes otherwise) and mention that the source is the "
@@ -51,9 +54,10 @@ INSTRUCTIONS = (
 )
 
 # 모든 조회 결과 끝에 붙이는 알림. 모델에 대한 부탁이며 강제는 아니다.
-NOTICE = ("[Note to assistant: answer only from the entries above. Do not add old spellings, dates, sources or examples "
-          "that are not listed; copy Old Hangul exactly; state that the source is the Historical Korean Vocabulary "
-          "Dictionary (우리말역사어휘사전).]")
+NOTICE = ("[Note to assistant: quote the entries above exactly and never invent old spellings, dates, sources or "
+          "examples; copy Old Hangul exactly. General explanation beyond the entries is welcome only in a separate part "
+          "labeled \"[사전 외 설명]\". State that the source is the Historical Korean Vocabulary Dictionary "
+          "(우리말역사어휘사전).]")
 
 BY_MAP = {"historical_form": "hist", "definition": "def", "prefix": "prefix"}
 

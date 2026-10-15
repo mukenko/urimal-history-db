@@ -43,6 +43,8 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
         async with session() as (s, init):
             self.assertEqual(init.server_info.name, "urimal-history")
             self.assertIn("Old Hangul", init.instructions)
+            self.assertIn("[사전 외 설명]", init.instructions)         # 사전 밖 설명은 표시하면 덧붙일 수 있다
+            self.assertIn("never invent", init.instructions.lower())
             tools = {t.name: t for t in (await s.list_tools()).tools}
             self.assertEqual(set(tools), {"lookup_word", "search_dictionary"})
             by = tools["search_dictionary"].input_schema["properties"]["by"]
@@ -54,6 +56,8 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             self.assertIn("고드름", out)
             self.assertIn("곳어름", out)
             self.assertIn("Note to assistant", out)
+            self.assertIn("[사전 외 설명]", out.split("\n")[-1])
+            self.assertNotIn("answer only from the entries", out)
             self.assertNotIn("[용례]", out)
 
     async def test_old_form_and_miss(self):
