@@ -7,27 +7,19 @@ urimal_html.py 는 결과 글자를 `<pre>` 한 덩어리로 넣는데, 이 모�
   - 긴 설명(어휘 역사 설명·부가 정보·기타 정보): 문단(##)과 줄로 나누고 [예]·[현대어 역] 줄은 작고 옅게 구분한다.
   - 용례는 세기별로 접었다 펼 수 있고(<details>), '모두 펼치기/접기' 버튼이 있다. 용례가 적으면 처음부터 펼쳐 둔다.
   - 같은 표제어가 둘 이상(동형이의어)이면 맨 위에 바로가기 목차를 둔다.
-  - 항목마다 "누리집 ↗"(국립국어원 누리집의 그 항목 화면)과, 링크 서버 화면에서는 "원본 데이터 ↗"(이 DB에 저장된 원본 XML, render_raw). 이어 붙인 설명·끝내 잘린 설명·내려받기 파일에서만 온 표제어에는 그 사실을 작게 알린다.
+  - 항목마다 "누리집 ↗"(국립국어원 누리집의 그 항목 화면). 이어 붙인 설명·끝내 잘린 설명·내려받기 파일에서만 온 표제어에는 그 사실을 작게 알린다.
   - 링크(link_base 가 있을 때만; 로컬 링크 서버가 보내는 화면): 관련어는 그 말이 표제어일 때, 어휘 역사의 옛 표기와 '그 밖의 표기'는 다른
     표제어에도 쓰인 표기일 때만 눌러서 그 조회 화면으로 간다(없는 곳으로 가는 링크는 만들지 않는다). 저장된 파일(file://)에는 링크가 없다.
 
 글꼴은 urimal_html 의 것을 그대로 쓴다(옛한글·한자 자형). 글자는 DB 에서 읽은 그대로이고 HTML 로만 이스케이프한다(모델이 다시 쓰지 않는다).
 """
 import html
-import os
 import re
-import sqlite3
 import urllib.parse
-import xml.etree.ElementTree as ET
-import zlib
-from pathlib import Path
 
-import urimal_build as ub
-import urimal_fetch as uf
 import urimal_html as uh
 import urimal_lookup as ul
 
-RAW_PATH = Path(os.environ.get("URIMAL_HISTORY_DB", Path(__file__).resolve().parent / "data" / "raw.sqlite"))
 OPEN_ALL_UNDER = 8          # 한 항목의 용례가 이 개수 이하이면 세기별 접기를 처음부터 펼쳐 둔다
 _CENT = re.compile(r"(\d+)세기")
 
@@ -144,11 +136,8 @@ def load_entry(db, code):
 # ---------------------------------------------------------------- 조각
 def head_html(d, ctx=None):
     num = f"<sup>{d['word_number']}</sup>" if d["word_number"] != 1 or d["homonyms"] > 1 else ""
-    links = ""
-    if ctx is not None and ctx.base is not None:       # 링크 서버가 보낸 화면에서만: 이 DB에 저장된 원본 데이터
-        links += f'<a class="orig" href="{ctx.base}/raw/{d["target_code"]}">원본 데이터 ↗</a>'
-    links += (f'<a class="orig{"" if links else " first"}" href="{html.escape(ul.original_url(d["form"], d["target_code"]))}" '
-              f'target="_blank" rel="noopener noreferrer">누리집 ↗</a>')
+    links = (f'<a class="orig" href="{html.escape(ul.original_url(d["form"], d["target_code"]))}" '
+             f'target="_blank" rel="noopener noreferrer">누리집 ↗</a>')
     return (f'<header><h2>{esc(d["form"])}{num}</h2>'
             f'<span class="meta">{esc(d["type"])} · #{d["target_code"]}</span>{links}</header>')
 
@@ -347,22 +336,13 @@ STYLE = """
   nav.toc a { color: var(--fg); display: block; } nav.toc a:hover { border-bottom-color: transparent; background: var(--hl); }
   nav.toc sup { color: var(--accent); }
   .warn { color: var(--mute); font-size: 13px; margin: .3rem 0 0; padding-left: .7rem; border-left: 3px solid var(--hl); }
-  a.orig.first, a.orig:first-of-type { margin-left: auto; }
-  a.orig + a.orig { margin-left: .4rem; }
-  a.orig {  font-size: 12px; color: var(--mute); border: 1px solid var(--line); border-radius: 999px; padding: 0 .65rem; }
+  a.orig { margin-left: auto;  font-size: 12px; color: var(--mute); border: 1px solid var(--line); border-radius: 999px; padding: 0 .65rem; }
   a.orig:hover { color: var(--accent); border-color: var(--accent); }
   .also { color: var(--mute); font-size: 14px; margin: .5rem 0 0; }
   ol.timeline .f a { color: var(--accent); }
   footer { margin-top: 2.2rem; padding-top: .8rem; border-top: 1px solid var(--line); font-size: 13px; color: var(--mute); }
   @media print { details { display: block; } details > summary::before { content: ""; } .toggle { display: none; } }
 """
-
-RAW_STYLE = """
-  pre.raw { white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, 'SF Mono', Menlo, monospace, __STACK__; font-size: 13px;
-            line-height: 1.55; background: var(--soft); border: 1px solid var(--line); border-radius: .5rem; padding: .8rem 1rem; overflow-x: auto; }
-  table.lens { border-collapse: collapse; font-size: 14px; } table.lens th, table.lens td { border: 1px solid var(--line); padding: .25rem .8rem; text-align: right; }
-  table.lens th:first-child { text-align: left; font-weight: 600; } tr.cut td { background: var(--hl); }
-""".replace("__STACK__", uh.FONT_STACK)
 
 SCRIPT = """<script>
 document.querySelectorAll('.toggle').forEach(function (b) {
@@ -396,104 +376,6 @@ def render_page(db, resolved, title, font_url=None, link_base=None):
             f'<title>{esc(title)} — 우리말역사어휘사전</title>\n<style>\n{css}</style>\n'
             f'<div class="site">우리말역사어휘사전</div>\n{"".join(parts)}\n'
             f'<footer>{uh.ATTRIBUTION}</footer>\n{SCRIPT}\n')
-
-
-# ---------------------------------------------------------------- 원본 데이터(raw.sqlite)
-def open_raw():
-    """원본 DB 를 읽기 전용으로 연다. 없으면 None."""
-    if not RAW_PATH.exists():
-        return None
-    try:
-        return sqlite3.connect(f"file:{RAW_PATH}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return None
-
-
-def _clean_raw(xml_text):
-    """API 가 돌려준 XML 의 <item> 부분을 글자 그대로 두고, 공백뿐인 줄과 줄 끝 공백만 정리해 읽기 좋게 한다."""
-    m = re.search(r"<item>.*</item>", xml_text, re.S)
-    lines = [ln.rstrip() for ln in (m.group(0) if m else xml_text).splitlines()]
-    return "\n".join(ln for ln in lines if ln.strip())
-
-
-def _pretty_item(xml_text):
-    root = ET.fromstring(xml_text)
-    ET.indent(root, space="  ")
-    return ET.tostring(root, encoding="unicode")
-
-
-def load_raw(rdb, code):
-    """code 의 원본: {"api": (받은 때, 글), "download": (파일 이름, 생성일, 글)} (없는 쪽은 None)."""
-    out = {"api": None, "download": None}
-    row = rdb.execute("SELECT fetched_at, xml FROM raw_xml WHERE target_code=?", (code,)).fetchone()
-    if row:
-        out["api"] = (row[0], _clean_raw(zlib.decompress(row[1]).decode("utf-8")))
-    try:
-        row = rdb.execute("SELECT source, created, xml FROM raw_download WHERE target_code=?", (code,)).fetchone()
-    except sqlite3.Error:
-        row = None
-    if row:
-        out["download"] = (row[0], row[1], _pretty_item(zlib.decompress(row[2]).decode("utf-8")))
-    return out
-
-
-_NOTE_TAGS = (("language_info", "어휘 역사 설명"), ("other_info", "부가 정보"), ("annotations", "기타 정보"))
-
-
-def _notes_len(xml_text, parse):
-    """원본 XML 의 세 설명 필드 글자 수(없으면 None)."""
-    try:
-        item = parse(xml_text)
-        item = item.find("item") if item.tag != "item" else item
-        oi = item.find("origin/origin_info")
-        return {t: len(ub.opt(oi, t) or "") if oi is not None and oi.find(t) is not None else None for t, _ in _NOTE_TAGS}
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def render_raw(db, rdb, code, font_url=None):
-    """한 항목의 원본 데이터 화면. 조회용 DB 에 그 항목이 없으면 None. rdb: 원본 DB(없으면 안내만)."""
-    d = load_entry(db, code)
-    if d is None:
-        return None
-    raw = load_raw(rdb, code) if rdb is not None else {"api": None, "download": None}
-    secs = []
-    if raw["api"]:
-        secs.append(f'<section><h3>Open API 응답 (받은 때 {esc(raw["api"][0])})</h3><pre class="raw">{esc(raw["api"][1])}</pre></section>')
-    if raw["download"]:
-        secs.append(f'<section><h3>누리집 전체 내려받기 파일 ({esc(raw["download"][0])}, 생성일 {esc(raw["download"][1])}) · 같은 항목의 XML을 들여써서 보여 줌</h3>'
-                    f'<pre class="raw">{esc(raw["download"][2])}</pre></section>')
-    if not secs:
-        secs.append('<p class="lead">이 항목의 원본이 원본 DB(data/raw.sqlite)에 없습니다.</p>')
-    api_len = _notes_len(raw["api"][1], uf.parse_xml) if raw["api"] else {}
-    dl_len = _notes_len(raw["download"][2], ET.fromstring) if raw["download"] else {}
-    rows = []
-    for tag, label in _NOTE_TAGS:
-        a, b, c = api_len.get(tag), dl_len.get(tag), len(d[tag] or "")
-        if a is None and b is None and not c:
-            continue
-        flag = " cut" if a is not None and a >= 255 and b is not None and b > a else ""
-        rows.append(f'<tr class="{flag.strip()}"><th>{label}</th><td>{a if a is not None else "—"}</td>'
-                    f'<td>{b if b is not None else "—"}</td><td>{c}</td></tr>')
-    table = ""
-    if rows:
-        table = ('<section><h3>설명 글의 글자 수 비교</h3><table class="lens"><tr><th></th><th>Open API</th><th>내려받기 파일</th><th>조회용 DB</th></tr>'
-                 + "".join(rows) + '</table><p class="warn">Open API 글이 255~256자에서 끝나고 내려받기 글이 더 길면(표시된 줄) API가 잘라 보낸 것입니다. '
-                 '조회용 DB 는 그 뒷부분을 내려받기 파일로 이어 붙입니다.</p></section>')
-    state = []
-    state.append(f'출처: {d["source"]}')
-    if d.get("merged_fields"):
-        state.append(f'이어 붙인 필드: {d["merged_fields"]}')
-    if d.get("truncated_fields"):
-        state.append(f'끝내 잘린 필드: {d["truncated_fields"]}')
-    css = uh._font_face_css(font_url) + STYLE.replace("__STACK__", uh.FONT_STACK) + RAW_STYLE
-    return (f'<!doctype html>\n<html lang="ko">\n<meta charset="utf-8">\n'
-            f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-            f'<title>{esc(d["form"])} 원본 데이터 — 우리말역사어휘사전</title>\n<style>\n{css}</style>\n'
-            f'<div class="site">우리말역사어휘사전 · 원본 데이터</div>\n'
-            f'<header><h2>{esc(d["form"])}<sup>{d["word_number"]}</sup></h2><span class="meta">#{code}</span></header>\n'
-            f'<p class="lead">이 맥의 원본 DB(raw.sqlite)에 저장된 그대로입니다. 조회용 DB는 이것을 읽어 만듭니다. {" · ".join(esc(x) for x in state)}</p>\n'
-            f'{table}{"".join(secs)}\n<footer>{uh.ATTRIBUTION}</footer>\n')
 
 
 def render_query(db, by, q, limit=50, max_entries=None, title=None, font_url=None, link_base=None):

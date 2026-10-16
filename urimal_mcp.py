@@ -26,7 +26,6 @@ import inspect
 import io
 import os
 import sys
-import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -61,15 +60,9 @@ INSTRUCTIONS = (
     "\"자세히\"), do a bounded search of about 3 to 4 extra tool calls: one or two definition or prefix searches and "
     "lookups of the two or three most promising headwords. Mark your own comparison as \"(추론)\"; then stop and say "
     "what you did not cover. Go wider only when the user asks. "
-    "Old Hangul and some Hanja may display wrongly in a chat window (blank boxes, split letters, other glyph forms) "
-    "because the app has no suitable fonts. When a tool result contains a line starting with \"정확한 글자로 보기:\" "
-    "followed by a link, end your answer with that link as a Markdown link (e.g. [정확한 글자로 보기](URL)) without "
-    "asking. A found entry always has this link: the page shows the entry from the local database with the exact "
-    "letters (fonts a chat window lacks), every example, and a button for the stored original data (the raw record "
-    "as received). If the result says \"옛한글 포함:\" but has no such link (a remote server cannot make one), tell the "
-    "user in one line that Old Hangul may display wrongly here and that running python3 urimal_lookup.py <word> "
-    "--html on their own computer shows the exact letters. Do not retype Old Hangul into an artifact for this "
-    "purpose. "
+    "When a tool result contains a line starting with \"원본 보기:\" followed by a link, end your answer with that link "
+    "as a Markdown link ([원본 보기](URL)), without asking and without explaining why; a found entry always has it. "
+    "Copy Old Hangul letters exactly as shown and never retype them into an artifact. "
     "Some long notes may be cut off in the source data, and text appended from the bulk download lacks double quotes. "
     "If a tool says a word is not an entry, say so; do not invent dictionary content. "
     "Answer in the user's language (Korean unless the user writes otherwise) and mention that the source is the "
@@ -89,35 +82,18 @@ NOTICE = ("[Note to assistant: quote dictionary facts exactly and never invent t
 ATTRIBUTION = "출처: 국립국어원 우리말역사어휘사전 (CC BY-SA 2.0 KR)"
 
 
-def _old_hangul_count(text):
-    """NFC 로 합친 뒤에도 남는 옛 조합 자모(U+1100~11FF, 확장 A·B)의 개수. 현대 한글은 음절로 합쳐지므로 세지 않는다."""
-    n = 0
-    for ch in unicodedata.normalize("NFC", text):
-        o = ord(ch)
-        if 0x1100 <= o <= 0x11FF or 0xA960 <= o <= 0xA97F or 0xD7B0 <= o <= 0xD7FF:
-            n += 1
-    return n
-
-
 def _view_link_enabled():
     """이 컴퓨터의 로컬 서버일 때만 링크를 만든다(원격 서버의 127.0.0.1 은 사용자 컴퓨터가 아니다). URIMAL_VIEW_LINK=0 이면 끈다."""
     return not HTTP_MODE and os.environ.get("URIMAL_VIEW_LINK", "1").strip().lower() not in ("0", "off", "false", "no")
 
 
 def _with_footer(text, label="", spec=None, found=True):
-    """결과 뒤에 (옛한글이 있으면) 사실 한 줄, (로컬이면) 보기 링크 한 줄, 출처 줄을 붙인다. 두 줄은 지시가 아니라 사실·주소다: 모델이 스스로
-    판단하기 어려워 서버가 알려 주고, 링크를 적는 규칙은 서버 지침·도구 설명에 둔다(도구 결과 안의 지시는 Claude 가 주입으로 본다).
-    spec(검색 조건)이 있는 조회는 찾았으면 **항상** 링크를 붙인다(옛한글이 없어도: 글꼴이 정확한 화면, 용례 전부, 원본 데이터 버튼).
-    spec 이 없는 호출(글자만 있는 경우)은 옛한글이 있을 때만 붙인다."""
-    n = _old_hangul_count(text)
+    """결과 뒤에 (로컬 서버이고 찾았으면) 보기 링크 한 줄과 출처 줄을 붙인다. 링크 줄은 지시가 아니라 주소만 담은 사실이다: 링크를 적는
+    규칙은 서버 지침·도구 설명에 둔다(도구 결과 안의 지시는 Claude 가 주입으로 본다). spec 은 링크 서버가 클릭할 때 다시 그릴 검색 조건이다."""
     extra = ""
-    if n:
-        extra += f"\n옛한글 포함: 조합 자모 {n}자 (채팅 화면에서는 깨져 보일 수 있음)"
-    if _view_link_enabled() and ((spec is not None and found) or (spec is None and n)):
+    if spec is not None and found and _view_link_enabled():
         try:
-            srv = view.get_server()
-            link = srv.add_query(label or "result", **spec) if spec else srv.add(label or "result", text)
-            extra += f"\n정확한 글자로 보기: {link}"
+            extra += f"\n원본 보기: {view.get_server().add_query(label or 'result', **spec)}"
         except Exception:  # noqa: BLE001  서버를 못 띄워도 조회는 돌려준다
             pass
     return text + extra + "\n" + ATTRIBUTION
@@ -175,11 +151,9 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     academic references. If the word is not an entry but appears as an OLD spelling of an entry (e.g. 곳어름 -> 고드름),
     that entry is shown; otherwise entries starting with the text are listed.
     Hyphens typed by the user are handled; do not add them yourself.
-    If the result has a line starting with "정확한 글자로 보기:", it is a link to a page that shows the found entries from the local
-    database with the exact Old Hangul and Hanja letters (chat windows often cannot), every example, and a button for
-    the stored original data: end your answer with that link as a Markdown link, without asking. If it
-    only says "옛한글 포함:" (a remote server), tell the user in one line that Old Hangul may display wrongly and that
-    python3 urimal_lookup.py <word> --html on their own computer shows it exactly.
+    If the result has a line starting with "원본 보기:", it is a link to a page that shows the found entries from the
+    local database; end your answer with that link as a Markdown link ([원본 보기](URL)), without asking and without
+    explaining why.
     Anything that explains WHY or HOW beyond what this tool returns (for example why a letter or sound changed,
     historical-linguistics background, usage advice) is not dictionary content: put it in a separate part labeled
     "[사전 외 설명]". End the answer with the source line.
@@ -202,11 +176,9 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     To find related words, vary the query: use key phrases taken from a definition; a few calls are enough.
     A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use lookup_word
     with a listed headword to see one entry in full.
-    If the result has a line starting with "정확한 글자로 보기:", it is a link to a page that shows the found entries from the local
-    database with the exact Old Hangul and Hanja letters (chat windows often cannot), every example, and a button for
-    the stored original data: end your answer with that link as a Markdown link, without asking. If it
-    only says "옛한글 포함:" (a remote server), tell the user in one line that Old Hangul may display wrongly and that
-    python3 urimal_lookup.py <word> --html on their own computer shows it exactly.
+    If the result has a line starting with "원본 보기:", it is a link to a page that shows the found entries from the
+    local database; end your answer with that link as a Markdown link ([원본 보기](URL)), without asking and without
+    explaining why.
     Explanations beyond the returned entries belong in a separate part labeled "[사전 외 설명]"; end the answer
     with the source line.
     Args: query = the text to search; by = the search kind above; limit = maximum results (default 10, max 50)."""

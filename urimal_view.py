@@ -26,7 +26,6 @@ MAX_VIEWS = 50
 HOST = "127.0.0.1"
 _KEY = re.compile(r"^/v/([0-9a-f]{32})$")
 SEARCH_BYS = ("form", "hist", "prefix", "def")
-_RAW = re.compile(r"^/raw/(\d{1,9})$")
 
 
 class ViewServer:
@@ -88,13 +87,6 @@ class ViewServer:
                         html = server.render_spec(q, {"by": by, "q": q, "limit": 30, "max_entries": 8}, font_url)
                         if html is None:
                             return self._send(404, "찾지 못했습니다.".encode("utf-8"))
-                        return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8", {"Cache-Control": "no-store"})
-                    m = _RAW.match(path)
-                    if m:                                  # 이 DB에 저장된 원본 데이터(raw.sqlite)
-                        font_url = "/f/font.otf" if uh.find_font() else None
-                        html = server.render_raw_page(int(m.group(1)), font_url)
-                        if html is None:
-                            return self._send(404, b"not found")
                         return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8", {"Cache-Control": "no-store"})
                     if path == "/f/font.otf":
                         font = uh.find_font()
@@ -161,20 +153,6 @@ class ViewServer:
             return None
         finally:
             db.close()
-
-    def render_raw_page(self, code, font_url):
-        """한 항목의 원본 데이터 화면. 조회용 DB 에 없는 코드이면 None(원본 DB 가 없어도 안내만 하는 화면을 돌려준다)."""
-        try:
-            db = ul.connect()
-        except SystemExit:
-            return None
-        rdb = up.open_raw()
-        try:
-            return up.render_raw(db, rdb, code, font_url)
-        finally:
-            db.close()
-            if rdb is not None:
-                rdb.close()
 
     def get(self, key):
         with self._lock:

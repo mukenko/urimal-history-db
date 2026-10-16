@@ -139,16 +139,15 @@ class Rendered(unittest.TestCase):
         self.assertNotIn("/s?by=", self.page("prefix", "고드"))
         self.assertIn('href="/s?by=form&amp;q=', up.render_query(self.db, "prefix", "고드", link_base=""))
 
-    def test_site_link_goes_to_the_exact_entry_and_raw_button_needs_the_server(self):
+    def test_site_link_goes_to_the_exact_entry_and_there_is_no_raw_button(self):
         html = self.page("form", "서리")
         self.assertEqual(html.count("누리집 ↗"), 2)
         self.assertIn("searchResultDetail?searchWord=%EC%84%9C%EB%A6%AC&amp;etymNo=861", html)    # 항목 바로가기(etymNo = target_code)
         self.assertIn("etymNo=2161", html)
         self.assertIn('target="_blank" rel="noopener noreferrer"', html)               # 새 창, 출처 정보 안 보냄
-        self.assertNotIn("/raw/", html)                                                # 저장 파일에는 원본 데이터 버튼이 없다(서버가 필요)
         live = up.render_query(self.db, "form", "서리", link_base="")
-        self.assertIn('href="/raw/861"', live)
-        self.assertIn('href="/raw/2161"', live)
+        self.assertNotIn("/raw/", live)                                                # 원본 데이터 버튼·화면은 두지 않는다
+        self.assertNotIn("원본 데이터", live)
 
     def test_notes_for_merged_truncated_and_download_only(self):
         merged = self.db.execute("SELECT target_code FROM entries WHERE merged_fields LIKE '%language_info%' LIMIT 1").fetchone()[0]
@@ -210,26 +209,11 @@ class ViewServerQuery(unittest.TestCase):
         page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
         self.assertIn('href="/s?by=form&amp;q=', page)
 
-    def test_raw_page(self):
+    def test_raw_route_is_gone(self):
         base = self.srv.add_query("t", "form", "고드름", 30, 8).rsplit("/v/", 1)[0]
-        page = urllib.request.urlopen(base + "/raw/4548", timeout=5).read().decode("utf-8")
-        self.assertIn("원본 데이터", page)
-        self.assertIn("&lt;item&gt;", page)                                            # Open API 응답의 <item>(이스케이프해서 글자 그대로)
-        self.assertIn("&lt;target_code&gt;4548&lt;/target_code&gt;", page)             # 글자 그대로(이스케이프해서) 보여 준다
-        self.assertIn("설명 글의 글자 수 비교", page)
-        self.assertRegex(page, r'<tr class="cut"><th>어휘 역사 설명</th><td>256</td><td>\d+</td><td>\d+</td></tr>')   # API 256자 → 내려받기가 더 김
-        for url, code in ((base + "/raw/999999999", 404), (base + "/raw/abc", 404)):
-            with self.assertRaises(urllib.error.HTTPError) as cm:
-                urllib.request.urlopen(url, timeout=5)
-            self.assertEqual(cm.exception.code, code, url)
-
-    def test_raw_page_without_raw_database(self):
-        db = ul.connect()
-        try:
-            html = up.render_raw(db, None, 4548)
-        finally:
-            db.close()
-        self.assertIn("원본이 원본 DB(data/raw.sqlite)에 없습니다", html)
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(base + "/raw/4548", timeout=5)
+        self.assertEqual(cm.exception.code, 404)
 
     def test_vanished_word_gives_404(self):
         url = self.srv.add_query("x", "form", "쀏쀏쀏쀏", 30, 8)
