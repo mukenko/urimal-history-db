@@ -139,12 +139,16 @@ class Rendered(unittest.TestCase):
         self.assertNotIn("/s?by=", self.page("prefix", "고드"))
         self.assertIn('href="/s?by=form&amp;q=', up.render_query(self.db, "prefix", "고드", link_base=""))
 
-    def test_original_link_in_every_entry(self):
+    def test_site_link_goes_to_the_exact_entry_and_raw_button_needs_the_server(self):
         html = self.page("form", "서리")
-        self.assertEqual(html.count('class="orig"'), 2)
-        self.assertIn('href="https://kdict.korean.go.kr/history/main/searchResult?searchType=simple&amp;tabType=title&amp;searchWord=%EC%84%9C%EB%A6%AC"', html)
+        self.assertEqual(html.count("누리집 ↗"), 2)
+        self.assertIn("searchResultDetail?searchWord=%EC%84%9C%EB%A6%AC&amp;etymNo=861", html)    # 항목 바로가기(etymNo = target_code)
+        self.assertIn("etymNo=2161", html)
         self.assertIn('target="_blank" rel="noopener noreferrer"', html)               # 새 창, 출처 정보 안 보냄
-        self.assertIn('class="orig"', up.render_query(self.db, "form", "씨름"))          # 저장 파일에도 있다(바깥 링크라 서버가 필요 없다)
+        self.assertNotIn("/raw/", html)                                                # 저장 파일에는 원본 데이터 버튼이 없다(서버가 필요)
+        live = up.render_query(self.db, "form", "서리", link_base="")
+        self.assertIn('href="/raw/861"', live)
+        self.assertIn('href="/raw/2161"', live)
 
     def test_notes_for_merged_truncated_and_download_only(self):
         merged = self.db.execute("SELECT target_code FROM entries WHERE merged_fields LIKE '%language_info%' LIMIT 1").fetchone()[0]
@@ -152,7 +156,7 @@ class Rendered(unittest.TestCase):
         cut = self.db.execute("SELECT target_code FROM entries WHERE truncated_fields IS NOT NULL LIMIT 1").fetchone()[0]
         html = up.entry_html(up.load_entry(self.db, cut))
         self.assertIn("중간에서 잘려 있습니다", html)
-        self.assertIn("누리집 원본 ↗</a>에서 볼 수 있습니다", html)
+        self.assertIn("누리집 ↗</a>에서 볼 수 있습니다", html)
         down = self.db.execute("SELECT target_code FROM entries WHERE source='download' LIMIT 1").fetchone()[0]
         self.assertIn("내려받기 파일의 내용입니다", up.entry_html(up.load_entry(self.db, down)))
         plain = self.db.execute("SELECT target_code FROM entries WHERE source='api' AND merged_fields IS NULL AND truncated_fields IS NULL "
@@ -205,6 +209,27 @@ class ViewServerQuery(unittest.TestCase):
         url = self.srv.add_query("씨름", "form", "씨름", 30, 8)
         page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
         self.assertIn('href="/s?by=form&amp;q=', page)
+
+    def test_raw_page(self):
+        base = self.srv.add_query("t", "form", "고드름", 30, 8).rsplit("/v/", 1)[0]
+        page = urllib.request.urlopen(base + "/raw/4548", timeout=5).read().decode("utf-8")
+        self.assertIn("원본 데이터", page)
+        self.assertIn("&lt;item&gt;", page)                                            # Open API 응답의 <item>(이스케이프해서 글자 그대로)
+        self.assertIn("&lt;target_code&gt;4548&lt;/target_code&gt;", page)             # 글자 그대로(이스케이프해서) 보여 준다
+        self.assertIn("설명 글의 글자 수 비교", page)
+        self.assertRegex(page, r'<tr class="cut"><th>어휘 역사 설명</th><td>256</td><td>\d+</td><td>\d+</td></tr>')   # API 256자 → 내려받기가 더 김
+        for url, code in ((base + "/raw/999999999", 404), (base + "/raw/abc", 404)):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(url, timeout=5)
+            self.assertEqual(cm.exception.code, code, url)
+
+    def test_raw_page_without_raw_database(self):
+        db = ul.connect()
+        try:
+            html = up.render_raw(db, None, 4548)
+        finally:
+            db.close()
+        self.assertIn("원본이 원본 DB(data/raw.sqlite)에 없습니다", html)
 
     def test_vanished_word_gives_404(self):
         url = self.srv.add_query("x", "form", "쀏쀏쀏쀏", 30, 8)

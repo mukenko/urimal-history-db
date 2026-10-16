@@ -34,11 +34,14 @@ def connect():
 
 
 ORIGIN_SEARCH = "https://kdict.korean.go.kr/history/main/searchResult?searchType=simple&tabType=title&searchWord="
+ORIGIN_DETAIL = "https://kdict.korean.go.kr/history/main/searchResultDetail?searchWord={q}&etymNo={code}"
 
 
-def original_url(form):
-    """우리말역사어휘사전 누리집에서 이 표제어를 찾은 화면의 주소(Open API 검색 결과의 link 와 같은 형식). 하이픈은 뺀다."""
-    return ORIGIN_SEARCH + urllib.parse.quote(norm(form))
+def original_url(form, code=None):
+    """국립국어원 누리집에서 이 표제어를 보는 화면의 주소. code(target_code)가 있으면 그 항목 하나로 바로 가고(etymNo = target_code,
+    열어서 확인), 없으면 표제어 검색 화면이다. 하이픈은 뺀다."""
+    q = urllib.parse.quote(norm(form))
+    return ORIGIN_DETAIL.format(q=q, code=int(code)) if code is not None else ORIGIN_SEARCH + q
 
 
 def norm(q):

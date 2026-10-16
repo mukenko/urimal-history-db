@@ -142,11 +142,9 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             out = text(await s.call_tool("lookup_word", {"word": "나무"}))
             lines = out.rstrip().splitlines()
             self.assertTrue(lines[-1].startswith("출처:"))
-            # 꼬리: 옛한글 포함 → 정확한 글자로 보기 → 원본 사전에서 보기 → 출처 순서
-            self.assertTrue(lines[-2].startswith("원본 사전에서 보기: https://kdict.korean.go.kr/history/"), lines[-2])
-            self.assertRegex(lines[-3], r"^정확한 글자로 보기: http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}$")
-            self.assertTrue(lines[-4].startswith("옛한글 포함:"))
-            url = lines[-3].split(": ", 1)[1]
+            self.assertRegex(lines[-2], r"^정확한 글자로 보기: http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}$")
+            self.assertTrue(lines[-3].startswith("옛한글 포함:"))
+            url = lines[-2].split(": ", 1)[1]
             page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
             self.assertIn('lang="ko"', page)
             sample = next(l.strip().split("  <")[0] for l in lines if any(0x1100 <= ord(c) <= 0x11FF for c in l) and "[" not in l[:6])
@@ -160,21 +158,18 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             for name in ("lookup_word", "search_dictionary"):
                 self.assertIn("정확한 글자로 보기", tools[name].description, name)
 
-    async def test_original_dictionary_link(self):
-        """찾은 표제어마다 누리집 원본 화면 주소 한 줄(사실과 주소만). 못 찾았거나 목록 결과면 없다."""
-        async with session(env={"URIMAL_MCP_NOTICE": "0", "URIMAL_VIEW_LINK": "0"}) as (s, init):
-            out = text(await s.call_tool("lookup_word", {"word": "가-건물"}))
-            self.assertIn("원본 사전에서 보기: https://kdict.korean.go.kr/history/main/searchResult?searchType=simple&tabType=title&searchWord=%EA%B0%80%EA%B1%B4%EB%AC%BC", out)   # 하이픈은 뺀다
-            old_form = text(await s.call_tool("lookup_word", {"word": "곳어름"}))                 # 옛 표기로 찾아도 표제어(고드름)의 원본 주소
-            self.assertIn("searchWord=%EA%B3%A0%EB%93%9C%EB%A6%84", old_form)
+    async def test_link_always_present_for_found_entries(self):
+        """옛한글이 없어도 찾았으면 항상 보기 링크가 붙는다(원본 데이터 버튼이 있는 화면). 못 찾았으면 없다."""
+        async with session(env={"URIMAL_MCP_NOTICE": "0"}) as (s, init):
+            for call, args in (("lookup_word", {"word": "가-건물"}),
+                               ("search_dictionary", {"query": "고드", "by": "prefix", "limit": 5})):
+                out = text(await s.call_tool(call, args))
+                self.assertNotIn("옛한글 포함", out)
+                self.assertRegex(out, r"\n정확한 글자로 보기: http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}\n출처:", call)
             miss = text(await s.call_tool("lookup_word", {"word": "쀏쀏쀏쀏"}))
-            self.assertNotIn("원본 사전에서 보기", miss)
-            listing = text(await s.call_tool("search_dictionary", {"query": "고드", "by": "prefix", "limit": 5}))
-            self.assertNotIn("원본 사전에서 보기", listing)
-            tools = {t.name: t for t in (await s.list_tools()).tools}
-            for name in ("lookup_word", "search_dictionary"):
-                self.assertIn("원본 사전에서 보기", tools[name].description, name)
-            self.assertIn("원본 사전에서 보기", init.instructions)
+            self.assertNotIn("정확한 글자로 보기", miss)
+            self.assertNotIn("원본 사전에서 보기", out)                                   # 누리집 줄은 두지 않는다
+            self.assertIn("a button for the stored original data", init.instructions)
 
     async def test_link_can_be_switched_off(self):
         async with session(env={"URIMAL_MCP_NOTICE": "0", "URIMAL_VIEW_LINK": "0"}) as (s, _):
