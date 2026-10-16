@@ -30,8 +30,6 @@ import unicodedata
 from pathlib import Path
 from typing import Literal
 
-import urimal_html as uh
-import urimal_page as up
 import urimal_lookup as ul
 import urimal_view as view
 
@@ -68,10 +66,10 @@ INSTRUCTIONS = (
     "followed by a link, end your answer with that link as a Markdown link (e.g. [정확한 글자로 보기](URL)) without "
     "asking. A found entry always has this link: the page shows the entry from the local database with the exact "
     "letters (fonts a chat window lacks), every example, and a button for the stored original data (the raw record "
-    "as received). If the result says \"옛한글 포함:\" but "
-    "has no such link, end your answer with one line offering to open the exact letters in the user's browser with the "
-    "open_in_browser tool, and call that tool only after the user agrees or asks to see the exact letters. Do not "
-    "retype Old Hangul into an artifact for this purpose. "
+    "as received). If the result says \"옛한글 포함:\" but has no such link (a remote server cannot make one), tell the "
+    "user in one line that Old Hangul may display wrongly here and that running python3 urimal_lookup.py <word> "
+    "--html on their own computer shows the exact letters. Do not retype Old Hangul into an artifact for this "
+    "purpose. "
     "Some long notes may be cut off in the source data, and text appended from the bulk download lacks double quotes. "
     "If a tool says a word is not an entry, say so; do not invent dictionary content. "
     "Answer in the user's language (Korean unless the user writes otherwise) and mention that the source is the "
@@ -180,14 +178,15 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     If the result has a line starting with "정확한 글자로 보기:", it is a link to a page that shows the found entries from the local
     database with the exact Old Hangul and Hanja letters (chat windows often cannot), every example, and a button for
     the stored original data: end your answer with that link as a Markdown link, without asking. If it
-    only says "옛한글 포함:", end with one line offering open_in_browser (call it only after the user agrees).
+    only says "옛한글 포함:" (a remote server), tell the user in one line that Old Hangul may display wrongly and that
+    python3 urimal_lookup.py <word> --html on their own computer shows it exactly.
     Anything that explains WHY or HOW beyond what this tool returns (for example why a letter or sound changed,
     historical-linguistics background, usage advice) is not dictionary content: put it in a separate part labeled
     "[사전 외 설명]". End the answer with the source line.
     Args: word = the Korean word (modern or old spelling), e.g. "고드름"; max_entries = how many homonyms to show
     (default 8); examples_per_century = usage examples shown per century and spelling (default 1, 0 = none, max 5).
     With the default, each century says how many more examples exist ("4개 중 1개 표시, 3개 더 있음") and a total line
-    follows; tell the user so. To see more of them, raise examples_per_century (max 5); open_in_browser shows all."""
+    follows; tell the user so. To see more of them, raise examples_per_century (max 5); the link page shows all."""
     n = max(0, min(int(examples_per_century), 5))
     cap = max(1, min(int(max_entries), 20))
     found, out = _query_text("form", word, n, 30, cap)
@@ -206,7 +205,8 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     If the result has a line starting with "정확한 글자로 보기:", it is a link to a page that shows the found entries from the local
     database with the exact Old Hangul and Hanja letters (chat windows often cannot), every example, and a button for
     the stored original data: end your answer with that link as a Markdown link, without asking. If it
-    only says "옛한글 포함:", end with one line offering open_in_browser (call it only after the user agrees).
+    only says "옛한글 포함:" (a remote server), tell the user in one line that Old Hangul may display wrongly and that
+    python3 urimal_lookup.py <word> --html on their own computer shows it exactly.
     Explanations beyond the returned entries belong in a separate part labeled "[사전 외 설명]"; end the answer
     with the source line.
     Args: query = the text to search; by = the search kind above; limit = maximum results (default 10, max 50)."""
@@ -215,31 +215,7 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     return _with_footer(out, query, {"by": BY_MAP[by], "q": query, "limit": lim}, found) + _notice_tail()
 
 
-@_safe
-def open_in_browser(word: str, max_entries: int = 8, examples: str = "all") -> str:
-    """Open the lookup result for a word in the user's web browser as an HTML page whose fonts display Old Hangul and
-    the Korean glyph forms of Hanja correctly (chat windows often cannot). It opens a window on the user's computer, so
-    call it ONLY when the user asks to see the exact letters, says the letters look broken, or agrees to your offer.
-    The page contains the same text as lookup_word, copied exactly. Only a local server can do this; a remote one cannot.
-    Args: word = the Korean word (modern or old spelling), e.g. "고래"; max_entries = how many homonyms to show
-    (default 8); examples = usage examples per century and spelling: a number or "all" (default "all")."""
-    if HTTP_MODE:
-        return ("This is a remote server and cannot open a browser on your computer. "
-                "On your own computer run: python3 urimal_lookup.py <word> --html")
-    n = "all" if str(examples).strip().lower() == "all" else max(0, min(int(examples), 30))
-    found, text = _query_text("form", word, n, 30, max(1, min(int(max_entries), 20)))
-    if not found:
-        return text
-    db = ul.connect()
-    try:
-        page = up.render_query(db, "form", word, 30, max(1, min(int(max_entries), 20)))
-    finally:
-        db.close()
-    path, opened = uh.save_rendered(page, word, open_it=True)
-    return f"브라우저로 열었습니다: {path}" if opened else f"HTML 파일을 만들었지만 브라우저를 열지 못했습니다. 직접 여세요: {path}"
-
-
-TOOLS = (lookup_word, search_dictionary, open_in_browser)
+TOOLS = (lookup_word, search_dictionary)
 
 
 def _check_db():
