@@ -18,6 +18,7 @@ import io
 import os
 import sqlite3
 import sys
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -30,6 +31,14 @@ def connect():
     db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     return db
+
+
+ORIGIN_SEARCH = "https://kdict.korean.go.kr/history/main/searchResult?searchType=simple&tabType=title&searchWord="
+
+
+def original_url(form):
+    """우리말역사어휘사전 누리집에서 이 표제어를 찾은 화면의 주소(Open API 검색 결과의 link 와 같은 형식). 하이픈은 뺀다."""
+    return ORIGIN_SEARCH + urllib.parse.quote(norm(form))
 
 
 def norm(q):
@@ -156,31 +165,26 @@ class Miss(Exception):
     """찾는 것이 없을 때(메시지는 사용자에게 그대로 보여 준다)."""
 
 
-def query(db, by, q, examples, limit, max_entries=None):
-    """조회 결과를 stdout 으로 출력한다. 찾지 못하면 Miss. (CLI 와 MCP 서버가 함께 쓴다.)"""
+def resolve(db, by, q, limit, max_entries=None):
+    """무엇을 보여 줄지 정한다(출력하지 않는다). 찾지 못하면 Miss.
+    돌려주는 값: {"kind": "entries"|"list", "codes": [...], "note": 머리말 또는 None, "more": (전체 수, 표시 수) 또는 None}
+    텍스트 출력(query)과 HTML 쪽(urimal_page)이 같은 결과를 보여 주도록 이 함수를 함께 쓴다."""
     q = norm(q)
     if not q:
         raise Miss("검색어가 비어 있습니다.")
-    cap = (lambda codes: codes[:max_entries]) if max_entries else (lambda codes: codes)
     if by == "form":
         codes = find_form(db, q)
         if codes:
-            for c in cap(codes):
-                show_entry(db, c, examples)
-            if max_entries and len(codes) > max_entries:
-                print(f"(동형 표제어 {len(codes)}개 중 {max_entries}개만 표시)")
-            return
+            more = (len(codes), max_entries) if max_entries and len(codes) > max_entries else None
+            return {"kind": "entries", "codes": codes[:max_entries] if max_entries else codes, "note": None, "more": more}
         codes = find_hist(db, q)
         if codes:
-            print(f"'{q}' 는 표제어가 아니지만 역사 속 표기로 나옵니다:\n")
-            for c in codes[:limit]:
-                show_entry(db, c, examples)
-            return
+            return {"kind": "entries", "codes": codes[:limit], "more": None,
+                    "note": f"'{q}' 는 표제어가 아니지만 역사 속 표기로 나옵니다:"}
         codes = find_prefix(db, q, limit)
         if codes:
-            print(f"'{q}' 로 시작하는 표제어 {len(codes)}개 (최대 {limit}):")
-            show_list(db, codes)
-            return
+            return {"kind": "list", "codes": codes, "more": None,
+                    "note": f"'{q}' 로 시작하는 표제어 {len(codes)}개 (최대 {limit}):"}
         raise Miss(f"'{q}': 찾지 못했습니다. 뜻풀이 안을 찾으려면 --by def 를 쓰세요.")
     elif by == "hist":
         codes = find_hist(db, q)
@@ -191,11 +195,23 @@ def query(db, by, q, examples, limit, max_entries=None):
     if not codes:
         raise Miss(f"'{q}': 찾지 못했습니다.")
     if len(codes) <= 3 and by != "prefix":
-        for c in codes:
-            show_entry(db, c, examples)
-    else:
-        print(f"{len(codes)}개 (최대 {limit}):")
-        show_list(db, codes)
+        return {"kind": "entries", "codes": codes, "note": None, "more": None}
+    return {"kind": "list", "codes": codes, "more": None, "note": f"{len(codes)}개 (최대 {limit}):"}
+
+
+def query(db, by, q, examples, limit, max_entries=None):
+    """조회 결과를 stdout 으로 출력한다. 찾지 못하면 Miss. (CLI 와 MCP 서버가 함께 쓴다.)"""
+    r = resolve(db, by, q, limit, max_entries)
+    if r["kind"] == "list":
+        print(r["note"])
+        show_list(db, r["codes"])
+        return
+    if r["note"]:
+        print(r["note"] + "\n")
+    for c in r["codes"]:
+        show_entry(db, c, examples)
+    if r["more"]:
+        print(f"(동형 표제어 {r['more'][0]}개 중 {r['more'][1]}개만 표시)")
 
 
 def main():
@@ -220,17 +236,29 @@ def main():
     db = connect()
     if not args.code and not args.query:
         ap.error("검색어나 --code 가 필요합니다")
-    buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(buf) if args.html else contextlib.nullcontext():
+    if args.html:                                   # 구조를 살린 문서형 HTML(urimal_page): 용례는 접기로 모두 들어간다
+        import urimal_html as uh
+        import urimal_page as up
+        try:
             if args.code:
-                show_entry(db, args.code, args.examples)
+                resolved = {"kind": "entries", "codes": [args.code], "note": None, "more": None}
+                page = up.render_page(db, resolved, str(args.code))
             else:
-                query(db, args.by, args.query, args.examples, args.limit)
+                page = up.render_query(db, args.by, args.query, args.limit)
+        except Miss as e:
+            sys.exit(str(e))
+        path, opened = uh.save_rendered(page, str(args.code or args.query), open_it=not args.no_open)
+        print(f"HTML 저장: {path}")
+        if not args.no_open and not opened:
+            print("브라우저를 열지 못했습니다. 위 파일을 직접 여세요.")
+        return
+    try:
+        if args.code:
+            show_entry(db, args.code, args.examples)
+        else:
+            query(db, args.by, args.query, args.examples, args.limit)
     except Miss as e:
         sys.exit(str(e))
-    if args.html:
-        write_html(buf.getvalue(), str(args.code or args.query), open_it=not args.no_open)
 
 
 def write_html(text, label, open_it):

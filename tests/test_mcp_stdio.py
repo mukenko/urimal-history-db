@@ -68,6 +68,121 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             for needle in ("(추론)", "[사전 외 설명]"):
                 self.assertIn(needle, notice, needle)
 
+    def test_old_hangul_count_ignores_modern_text(self):
+        """모델이 '옛한글이 들어 있는지'를 스스로 판단하기 어려워 서버가 사실로 알려 준다(2026-10-16, 나무 시험에서 제안이 안 나옴)."""
+        import unicodedata
+        import urimal_mcp as um
+        self.assertEqual(um._old_hangul_count("현대 한글과 漢字 고래 [단어]"), 0)
+        self.assertEqual(um._old_hangul_count(unicodedata.normalize("NFD", "한글 고래")), 0)   # 분해된 현대 한글은 옛한글이 아니다
+        self.assertGreater(um._old_hangul_count("브ᅀᅥᆨ 구듨 골샛 거믜여ᇰ."), 0)
+        self.assertGreater(um._old_hangul_count("ᄂᆞ모"), 0)
+
+    async def test_result_says_when_it_contains_old_hangul(self):
+        async with session(env={"URIMAL_MCP_NOTICE": "0"}) as (s, init):
+            out = text(await s.call_tool("lookup_word", {"word": "나무"}))
+            lines = out.rstrip().splitlines()
+            note = [l for l in lines if l.startswith("옛한글 포함:")]
+            self.assertEqual(len(note), 1, note)
+            self.assertRegex(note[0], r"조합 자모 \d+자")
+            self.assertEqual(lines[-1], "출처: 국립국어원 우리말역사어휘사전 (CC BY-SA 2.0 KR)")   # 출처 줄이 마지막
+            self.assertLess(lines.index(note[0]), len(lines) - 1)
+            # 표시는 사실이고 지시가 아니다(도구 결과 안의 지시는 Claude 가 주입으로 본다)
+            for forbidden in ("open_in_browser", "offer", "call "):
+                self.assertNotIn(forbidden, note[0])
+            # 제안 규칙은 서버 지침과 도구 설명에 있다
+            ins = init.instructions
+            self.assertIn("옛한글 포함", ins)
+            tools = {t.name: t for t in (await s.list_tools()).tools}
+            for name in ("lookup_word", "search_dictionary"):
+                d = tools[name].description
+                self.assertIn("옛한글 포함", d, name)
+                self.assertIn("open_in_browser", d, name)
+
+    OLD = "\u1107\u1173\u1140\u1165\u11A8 \uAD6C\uB4E8 \uACE8\uC0D8 \uAC70\uBBDC\uC5EC\u11F0."
+
+    def test_footer_link_rules(self):
+        """옛한글이 있고 로컬 서버일 때만 '정확한 글자로 보기' 링크를 붙인다. 링크는 지시가 아니라 URL 만 담은 데이터다."""
+        import urimal_mcp as um
+
+        class Fake:
+            def add(self, label, text):
+                return "http://127.0.0.1:1/v/" + "a" * 32
+        old = um.view.get_server
+        um.view.get_server = lambda: Fake()
+        self.addCleanup(setattr, um.view, "get_server", old)
+        old_mode = um.HTTP_MODE
+        self.addCleanup(setattr, um, "HTTP_MODE", old_mode)
+        link = "정확한 글자로 보기: http://127.0.0.1:1/v/" + "a" * 32
+        lines = um._with_footer(self.OLD, "고래").split("\n")
+        self.assertEqual(lines[0], self.OLD)
+        self.assertTrue(lines[1].startswith("옛한글 포함:"))
+        self.assertEqual(lines[2], link)
+        self.assertTrue(lines[3].startswith("출처:"))
+        modern = um._with_footer("현대 한글 고래", "고래")                          # 옛한글 없음: 표시도 링크도 없다
+        self.assertNotIn("옛한글 포함", modern)
+        self.assertNotIn("정확한 글자로 보기", modern)
+        um.HTTP_MODE = True                                                        # 원격 서버: 표시는 있고 링크는 없다
+        remote = um._with_footer(self.OLD, "고래")
+        self.assertIn("옛한글 포함", remote)
+        self.assertNotIn("정확한 글자로 보기", remote)
+        um.HTTP_MODE = False
+        os.environ["URIMAL_VIEW_LINK"] = "0"
+        self.addCleanup(os.environ.pop, "URIMAL_VIEW_LINK", None)
+        self.assertNotIn("정확한 글자로 보기", um._with_footer(self.OLD, "고래"))
+        os.environ.pop("URIMAL_VIEW_LINK")
+        um.view.get_server = lambda: (_ for _ in ()).throw(OSError("bind failed"))   # 서버를 못 띄워도 조회는 된다
+        failed = um._with_footer(self.OLD, "고래")
+        self.assertIn("옛한글 포함", failed)
+        self.assertNotIn("정확한 글자로 보기", failed)
+
+    async def test_result_link_opens_the_exact_page(self):
+        import html as htmllib
+        import urllib.request
+        async with session(env={"URIMAL_MCP_NOTICE": "0"}) as (s, init):
+            out = text(await s.call_tool("lookup_word", {"word": "나무"}))
+            lines = out.rstrip().splitlines()
+            self.assertTrue(lines[-1].startswith("출처:"))
+            # 꼬리: 옛한글 포함 → 정확한 글자로 보기 → 원본 사전에서 보기 → 출처 순서
+            self.assertTrue(lines[-2].startswith("원본 사전에서 보기: https://kdict.korean.go.kr/history/"), lines[-2])
+            self.assertRegex(lines[-3], r"^정확한 글자로 보기: http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}$")
+            self.assertTrue(lines[-4].startswith("옛한글 포함:"))
+            url = lines[-3].split(": ", 1)[1]
+            page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
+            self.assertIn('lang="ko"', page)
+            sample = next(l.strip().split("  <")[0] for l in lines if any(0x1100 <= ord(c) <= 0x11FF for c in l) and "[" not in l[:6])
+            sample = sample.lstrip("· ")                                          # 텍스트 결과의 글머리 기호는 HTML 에 없다
+            import re
+            self.assertIn(sample, htmllib.unescape(re.sub(r"<[^>]+>", "", page)))  # 결과의 옛한글 줄이 그대로 들어 있다(강조 태그만 뺌)
+            # 규칙은 서버 지침과 도구 설명에 있다(링크가 있으면 묻지 않고 답변 끝에 적는다)
+            self.assertIn("정확한 글자로 보기", init.instructions)
+            self.assertIn("without asking", init.instructions)
+            tools = {t.name: t for t in (await s.list_tools()).tools}
+            for name in ("lookup_word", "search_dictionary"):
+                self.assertIn("정확한 글자로 보기", tools[name].description, name)
+
+    async def test_original_dictionary_link(self):
+        """찾은 표제어마다 누리집 원본 화면 주소 한 줄(사실과 주소만). 못 찾았거나 목록 결과면 없다."""
+        async with session(env={"URIMAL_MCP_NOTICE": "0", "URIMAL_VIEW_LINK": "0"}) as (s, init):
+            out = text(await s.call_tool("lookup_word", {"word": "가-건물"}))
+            self.assertIn("원본 사전에서 보기: https://kdict.korean.go.kr/history/main/searchResult?searchType=simple&tabType=title&searchWord=%EA%B0%80%EA%B1%B4%EB%AC%BC", out)   # 하이픈은 뺀다
+            old_form = text(await s.call_tool("lookup_word", {"word": "곳어름"}))                 # 옛 표기로 찾아도 표제어(고드름)의 원본 주소
+            self.assertIn("searchWord=%EA%B3%A0%EB%93%9C%EB%A6%84", old_form)
+            miss = text(await s.call_tool("lookup_word", {"word": "쀏쀏쀏쀏"}))
+            self.assertNotIn("원본 사전에서 보기", miss)
+            listing = text(await s.call_tool("search_dictionary", {"query": "고드", "by": "prefix", "limit": 5}))
+            self.assertNotIn("원본 사전에서 보기", listing)
+            tools = {t.name: t for t in (await s.list_tools()).tools}
+            for name in ("lookup_word", "search_dictionary"):
+                self.assertIn("원본 사전에서 보기", tools[name].description, name)
+            self.assertIn("원본 사전에서 보기", init.instructions)
+
+    async def test_link_can_be_switched_off(self):
+        async with session(env={"URIMAL_MCP_NOTICE": "0", "URIMAL_VIEW_LINK": "0"}) as (s, _):
+            out = text(await s.call_tool("lookup_word", {"word": "나무"}))
+            self.assertIn("옛한글 포함:", out)
+            self.assertNotIn("정확한 글자로 보기", out)
+            self.assertTrue(out.rstrip().splitlines()[-1].startswith("출처:"))
+
     async def test_open_in_browser_writes_exact_html(self):
         """채팅에서 요청하면 서버가 글꼴 지정 HTML 을 만들어 연다(테스트에서는 URIMAL_HTML_OPEN=0 으로 열지 않는다)."""
         import tempfile
@@ -85,7 +200,8 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             db = sqlite3.connect(f"file:{ROOT / 'data' / 'urimal.sqlite'}?mode=ro", uri=True)
             original = db.execute("SELECT example FROM examples WHERE example LIKE '%구듨 골샛%' ORDER BY id LIMIT 1").fetchone()[0]
             db.close()
-            self.assertIn(original.rstrip("."), html)                       # DB 원문 그대로
+            import re
+            self.assertIn(original.rstrip("."), re.sub(r"</?strong>", "", html))   # DB 원문 그대로(표제어 강조 태그만 뺀다)
 
     async def test_open_in_browser_unknown_word_makes_no_file(self):
         import tempfile

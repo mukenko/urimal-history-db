@@ -37,7 +37,8 @@ CREATE TABLE entries(
     other_forms   TEXT,                -- 역사 속 표기(쉼표로 이은 원문)
     related_forms TEXT,                -- 관련어(원문 표기: XML의 realted_forms)
     source        TEXT NOT NULL,       -- 'api'(Open API) | 'download'(누리집 전체 내려받기에만 있는 표제어)
-    merged_fields TEXT                 -- API가 256자에서 자른 필드 중 뒷부분을 내려받기 파일로 채운 필드 이름(쉼표)
+    merged_fields TEXT,                -- API가 256자에서 자른 필드 중 뒷부분을 내려받기 파일로 채운 필드 이름(쉼표)
+    truncated_fields TEXT              -- API 글이 잘린 듯한데 이어 붙이지 못한 필드 이름(쉼표): 내려받기 글이 더 길다
 );
 CREATE INDEX entries_form ON entries(form, word_number);
 
@@ -242,19 +243,26 @@ def build(raw_path, out_path):
             item, source = dl[code], "download"
         w = item.find("word_info")
         oi = item.find("origin/origin_info")
-        texts, merged = {}, []
+        texts, merged, truncated = {}, [], []
         for tag in ("language_info", "other_info", "annotations"):
             text = opt(oi, tag)
             if source == "api" and code in dl:
-                text, did = merge_tail(text, opt(dl[code].find("origin/origin_info"), tag))
+                dl_text = opt(dl[code].find("origin/origin_info"), tag)
+                text, did = merge_tail(text, dl_text)
                 if did:
                     merged.append(tag)
+                elif text and dl_text and any(len(p) >= 255 for p in text.split("##")):
+                    # 이어 붙이지 못했다: 내려받기 글이 더 길면 API 글이 잘린 채 남은 것이다(원래 255~256자인 글은 같은 길이다)
+                    api_len = min(len(_norm_map(text, True)[0]), len(_norm_map(text, False)[0]))
+                    if len(_norm_map(dl_text, False)[0]) > api_len:
+                        truncated.append(tag)
             texts[tag] = text
         db.execute(
-            "INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (code, w.findtext("form"), int(w.findtext("word_number") or 1), w.findtext("type"),
              texts["language_info"], texts["other_info"], texts["annotations"],
-             opt(oi, "other_forms"), opt(oi, "realted_forms"), source, ",".join(merged) or None))
+             opt(oi, "other_forms"), opt(oi, "realted_forms"), source, ",".join(merged) or None,
+             ",".join(truncated) or None))
         defs = []
         for i, d in enumerate(item.findall("sense_info/definitions/definition"), 1):
             links = [x.text.strip() for x in d.iter("word_no") if x.text]
@@ -332,7 +340,8 @@ def main():
         sys.exit("검증 실패, 기존 DB는 그대로 둡니다:\n  " + "\n  ".join(errs))
     src = dict(db.execute("SELECT source, COUNT(*) FROM entries GROUP BY source").fetchall())
     merged = db.execute("SELECT COUNT(*) FROM entries WHERE merged_fields IS NOT NULL").fetchone()[0]
-    print(f"  출처: {src}, 잘린 설명을 내려받기 파일로 이어 붙인 표제어 {merged}개")
+    cut = db.execute("SELECT COUNT(*) FROM entries WHERE truncated_fields IS NOT NULL").fetchone()[0]
+    print(f"  출처: {src}, 잘린 설명을 내려받기 파일로 이어 붙인 표제어 {merged}개, 이어 붙이지 못해 잘린 채인 표제어 {cut}개")
     for t in ("entries", "senses", "forms_changed", "hist_groups", "hist_centuries", "examples", "refs"):
         print(f"  {t:<15}{db.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]:>8}")
     db.execute("VACUUM")

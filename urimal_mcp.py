@@ -26,11 +26,14 @@ import inspect
 import io
 import os
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Literal
 
 import urimal_html as uh
+import urimal_page as up
 import urimal_lookup as ul
+import urimal_view as view
 
 SERVER_NAME = "urimal-history"
 HTTP_HOST = "127.0.0.1"                 # 바인드 주소는 고정한다(외부에 직접 열지 않는다)
@@ -61,9 +64,15 @@ INSTRUCTIONS = (
     "lookups of the two or three most promising headwords. Mark your own comparison as \"(추론)\"; then stop and say "
     "what you did not cover. Go wider only when the user asks. "
     "Old Hangul and some Hanja may display wrongly in a chat window (blank boxes, split letters, other glyph forms) "
-    "because the app has no suitable fonts. When your answer contains Old Hangul, end it with one line offering to "
-    "open the exact letters in the user's browser with the open_in_browser tool; call that tool only after the user "
-    "agrees or asks to see the exact letters. Do not retype Old Hangul into an artifact for this purpose. "
+    "because the app has no suitable fonts. When a tool result contains a line starting with \"정확한 글자로 보기:\" "
+    "followed by a link, end your answer with that link as a Markdown link (e.g. [정확한 글자로 보기](URL)) without "
+    "asking; the page shows the exact letters with fonts a chat window lacks. When the result also has a line "
+    "starting with \"원본 사전에서 보기\" followed by a link, add it as a Markdown link too (e.g. "
+    "[원본 사전에서 보기](URL)): it opens the same headword on the official dictionary website so the user can compare "
+    "with the original. If the result says \"옛한글 포함:\" but "
+    "has no such link, end your answer with one line offering to open the exact letters in the user's browser with the "
+    "open_in_browser tool, and call that tool only after the user agrees or asks to see the exact letters. Do not "
+    "retype Old Hangul into an artifact for this purpose. "
     "Some long notes may be cut off in the source data, and text appended from the bulk download lacks double quotes. "
     "If a tool says a word is not an entry, say so; do not invent dictionary content. "
     "Answer in the user's language (Korean unless the user writes otherwise) and mention that the source is the "
@@ -81,6 +90,63 @@ NOTICE = ("[Note to assistant: quote dictionary facts exactly and never invent t
 
 
 ATTRIBUTION = "출처: 국립국어원 우리말역사어휘사전 (CC BY-SA 2.0 KR)"
+
+
+def _old_hangul_count(text):
+    """NFC 로 합친 뒤에도 남는 옛 조합 자모(U+1100~11FF, 확장 A·B)의 개수. 현대 한글은 음절로 합쳐지므로 세지 않는다."""
+    n = 0
+    for ch in unicodedata.normalize("NFC", text):
+        o = ord(ch)
+        if 0x1100 <= o <= 0x11FF or 0xA960 <= o <= 0xA97F or 0xD7B0 <= o <= 0xD7FF:
+            n += 1
+    return n
+
+
+def _view_link_enabled():
+    """이 컴퓨터의 로컬 서버일 때만 링크를 만든다(원격 서버의 127.0.0.1 은 사용자 컴퓨터가 아니다). URIMAL_VIEW_LINK=0 이면 끈다."""
+    return not HTTP_MODE and os.environ.get("URIMAL_VIEW_LINK", "1").strip().lower() not in ("0", "off", "false", "no")
+
+
+def _with_footer(text, label="", spec=None):
+    """결과 뒤에 (옛한글이 있으면) 사실 한 줄, (로컬이면) 보기 링크 한 줄, 출처 줄을 붙인다. 두 줄은 지시가 아니라 사실·주소다: 모델이 스스로
+    판단하기 어려워 서버가 알려 주고, 링크를 적는 규칙은 서버 지침·도구 설명에 둔다(도구 결과 안의 지시는 Claude 가 주입으로 본다)."""
+    n = _old_hangul_count(text)
+    extra = ""
+    if n:
+        extra += f"\n옛한글 포함: 조합 자모 {n}자 (채팅 화면에서는 깨져 보일 수 있음)"
+        if _view_link_enabled():
+            try:
+                srv = view.get_server()
+                link = srv.add_query(label or "result", **spec) if spec else srv.add(label or "result", text)
+                extra += f"\n정확한 글자로 보기: {link}"
+            except Exception:  # noqa: BLE001  서버를 못 띄워도 조회는 돌려준다
+                pass
+    if spec:
+        extra += _origin_lines(spec)
+    return text + extra + "\n" + ATTRIBUTION
+
+
+def _origin_lines(spec):
+    """찾은 표제어마다 누리집 원본 화면 주소 한 줄(사실과 주소만). 목록 결과이거나 못 찾으면 없다. 같은 표제어는 한 번만, 최대 3개."""
+    try:
+        db = ul.connect()
+    except SystemExit:
+        return ""
+    try:
+        r = ul.resolve(db, spec["by"], spec["q"], spec["limit"], spec.get("max_entries"))
+        if r["kind"] != "entries":
+            return ""
+        forms = []
+        for code in r["codes"]:
+            row = db.execute("SELECT form FROM entries WHERE target_code=?", (code,)).fetchone()
+            if row and ul.norm(row[0]) not in forms:
+                forms.append(ul.norm(row[0]))
+        lines = [f"\n원본 사전에서 보기{'(' + f + ')' if len(forms) > 1 else ''}: {ul.original_url(f)}" for f in forms[:3]]
+        return "".join(lines)
+    except Exception:  # noqa: BLE001  원본 링크가 없어도 조회는 돌려준다
+        return ""
+    finally:
+        db.close()
 
 
 def _notice_tail():
@@ -135,6 +201,11 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     academic references. If the word is not an entry but appears as an OLD spelling of an entry (e.g. 곳어름 -> 고드름),
     that entry is shown; otherwise entries starting with the text are listed.
     Hyphens typed by the user are handled; do not add them yourself.
+    If the result has a line starting with "정확한 글자로 보기:", it is a link to a page that shows the exact Old Hangul and
+    Hanja letters (chat windows often cannot): end your answer with that link as a Markdown link, without asking. If it
+    only says "옛한글 포함:", end with one line offering open_in_browser (call it only after the user agrees).
+    If the result has a line starting with "원본 사전에서 보기", add that link too ([원본 사전에서 보기](URL)): it opens
+    the headword on the official dictionary website for comparison with the original.
     Anything that explains WHY or HOW beyond what this tool returns (for example why a letter or sound changed,
     historical-linguistics background, usage advice) is not dictionary content: put it in a separate part labeled
     "[사전 외 설명]". End the answer with the source line.
@@ -143,7 +214,9 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     With the default, each century says how many more examples exist ("4개 중 1개 표시, 3개 더 있음") and a total line
     follows; tell the user so. To see more of them, raise examples_per_century (max 5); open_in_browser shows all."""
     n = max(0, min(int(examples_per_century), 5))
-    return _run("form", word, n, 30, max(1, min(int(max_entries), 20))) + "\n" + ATTRIBUTION + _notice_tail()
+    cap = max(1, min(int(max_entries), 20))
+    return _with_footer(_run("form", word, n, 30, cap), word,
+                        {"by": "form", "q": word, "limit": 30, "max_entries": cap}) + _notice_tail()
 
 
 @_safe
@@ -155,10 +228,17 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     To find related words, vary the query: use key phrases taken from a definition; a few calls are enough.
     A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use lookup_word
     with a listed headword to see one entry in full.
+    If the result has a line starting with "정확한 글자로 보기:", it is a link to a page that shows the exact Old Hangul and
+    Hanja letters (chat windows often cannot): end your answer with that link as a Markdown link, without asking. If it
+    only says "옛한글 포함:", end with one line offering open_in_browser (call it only after the user agrees).
+    If the result has a line starting with "원본 사전에서 보기", add that link too ([원본 사전에서 보기](URL)): it opens
+    the headword on the official dictionary website for comparison with the original.
     Explanations beyond the returned entries belong in a separate part labeled "[사전 외 설명]"; end the answer
     with the source line.
     Args: query = the text to search; by = the search kind above; limit = maximum results (default 10, max 50)."""
-    return _run(BY_MAP[by], query, 1, max(1, min(int(limit), 50))) + "\n" + ATTRIBUTION + _notice_tail()
+    lim = max(1, min(int(limit), 50))
+    return _with_footer(_run(BY_MAP[by], query, 1, lim), query,
+                        {"by": BY_MAP[by], "q": query, "limit": lim}) + _notice_tail()
 
 
 @_safe
@@ -176,7 +256,12 @@ def open_in_browser(word: str, max_entries: int = 8, examples: str = "all") -> s
     found, text = _query_text("form", word, n, 30, max(1, min(int(max_entries), 20)))
     if not found:
         return text
-    path, opened = uh.save_html(text, word, open_it=True)
+    db = ul.connect()
+    try:
+        page = up.render_query(db, "form", word, 30, max(1, min(int(max_entries), 20)))
+    finally:
+        db.close()
+    path, opened = uh.save_rendered(page, word, open_it=True)
     return f"브라우저로 열었습니다: {path}" if opened else f"HTML 파일을 만들었지만 브라우저를 열지 못했습니다. 직접 여세요: {path}"
 
 

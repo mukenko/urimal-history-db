@@ -138,7 +138,9 @@ class Cli(unittest.TestCase):
             db = sqlite3.connect(f"file:{ROOT / 'data' / 'urimal.sqlite'}?mode=ro", uri=True)
             original = db.execute("SELECT example FROM examples WHERE example LIKE '%구듨 골샛%' ORDER BY id LIMIT 1").fetchone()[0]
             db.close()
-            self.assertIn(original.rstrip("."), html)                    # DB 원문 그대로(분해된 자모 순서까지 같다)
+            import re
+            plain = re.sub(r"</?strong>", "", html)                       # 표제어 강조 태그만 뺀다(글자는 그대로)
+            self.assertIn(original.rstrip("."), plain)                   # DB 원문 그대로(분해된 자모 순서까지 같다)
             self.assertTrue(any(0x1100 <= ord(c) <= 0x11FF for c in original))   # 실제로 조합 자모가 들어 있는 줄이다
             self.assertIn('lang="ko"', html)
             self.assertIn("고래.html", r.stdout)                           # 저장 위치를 알려 준다
