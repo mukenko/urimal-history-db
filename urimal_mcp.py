@@ -61,8 +61,8 @@ INSTRUCTIONS = (
     "lookups of the two or three most promising headwords. Mark your own comparison as \"(추론)\"; then stop and say "
     "what you did not cover. Go wider only when the user asks. "
     "When a tool result contains a line starting with \"원본 보기:\" followed by a link, end your answer with that link "
-    "as a Markdown link ([원본 보기](URL)), without asking and without explaining why; a found entry always has it. "
-    "Copy Old Hangul letters exactly as shown and never retype them into an artifact. "
+    "as a Markdown link ([원본 보기](URL)); a found entry always has it. "
+    "Copy Old Hangul letters exactly as shown. "
     "Some long notes may be cut off in the source data, and text appended from the bulk download lacks double quotes. "
     "If a tool says a word is not an entry, say so; do not invent dictionary content. "
     "Answer in the user's language (Korean unless the user writes otherwise) and mention that the source is the "
@@ -152,8 +152,7 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     that entry is shown; otherwise entries starting with the text are listed.
     Hyphens typed by the user are handled; do not add them yourself.
     If the result has a line starting with "원본 보기:", it is a link to a page that shows the found entries from the
-    local database; end your answer with that link as a Markdown link ([원본 보기](URL)), without asking and without
-    explaining why.
+    local database; end your answer with that link as a Markdown link ([원본 보기](URL)).
     Anything that explains WHY or HOW beyond what this tool returns (for example why a letter or sound changed,
     historical-linguistics background, usage advice) is not dictionary content: put it in a separate part labeled
     "[사전 외 설명]". End the answer with the source line.
@@ -177,8 +176,7 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use lookup_word
     with a listed headword to see one entry in full.
     If the result has a line starting with "원본 보기:", it is a link to a page that shows the found entries from the
-    local database; end your answer with that link as a Markdown link ([원본 보기](URL)), without asking and without
-    explaining why.
+    local database; end your answer with that link as a Markdown link ([원본 보기](URL)).
     Explanations beyond the returned entries belong in a separate part labeled "[사전 외 설명]"; end the answer
     with the source line.
     Args: query = the text to search; by = the search kind above; limit = maximum results (default 10, max 50)."""

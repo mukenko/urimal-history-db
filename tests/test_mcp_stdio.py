@@ -121,16 +121,16 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             self.assertIn(sample, htmllib.unescape(re.sub(r"<[^>]+>", "", page)))      # 결과의 옛한글 줄이 그대로 들어 있다(강조 태그만 뺌)
             self.assertNotIn("원본 데이터 ↗", page)                                    # 원본 데이터 버튼은 없다
             self.assertIn("누리집 ↗", page)                                            # 누리집 버튼은 있다
-            # 규칙은 서버 지침과 도구 설명에 있다(링크가 있으면 묻지 않고, 이유를 설명하지 않고 답변 끝에 적는다)
+            # 규칙은 서버 지침과 도구 설명에 있다(링크가 있으면 [원본 보기](URL)로 답변 끝에 적는다)
             ins = init.instructions
             self.assertIn("원본 보기", ins)
-            self.assertIn("without asking and without explaining why", ins)
+            self.assertIn("[원본 보기](URL)", ins)
             self.assertNotIn("may display wrongly", ins)                              # 깨질 수 있다는 설명을 모델이 따라 말하지 않게
             tools = {t.name: t for t in (await s.list_tools()).tools}
             for name in ("lookup_word", "search_dictionary"):
                 d = " ".join(tools[name].description.split())                     # 설명의 줄바꿈은 무시한다
                 self.assertIn("원본 보기", d, name)
-                self.assertIn("without asking and without explaining why", d, name)
+                self.assertIn("[원본 보기](URL)", d, name)
 
     async def test_link_always_present_for_found_entries(self):
         """옛한글이 없어도 찾았으면 항상 '원본 보기' 링크가 붙는다. 못 찾았으면 없다."""
