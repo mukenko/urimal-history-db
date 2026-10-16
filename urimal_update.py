@@ -52,6 +52,7 @@ import urimal_import as ui
 
 ROOT = Path(__file__).resolve().parent
 LOG_PATH = ROOT / "data" / "update.log"
+ALERT_FILE = ROOT / "data" / "last_alert.txt"          # 마지막 알림(새 표제어·삭제)의 전체 내용
 LAUNCHD_LOG = ROOT / "data" / "update_launchd.log"
 DOWNLOAD_DIR = ROOT / "data" / "download"
 RSYNC_LOCK = Path(os.environ.get("URIMAL_UPDATE_LOCK") or "/tmp/rsync_to_rpi.lock")
@@ -516,7 +517,8 @@ def run(args, client=None):
         return
 
     log(f"시작: 단계 {', '.join(steps)} / 오늘 호출 {client.used_today()}/{client.limit}")
-    meta_write(db, last_start=uf.now(), last_result="running")
+    start_iso = uf.now()
+    meta_write(db, last_start=start_iso, last_result="running")
     if "download" in steps:
         try:
             changed |= step_download(db, force=args.force_download)
@@ -551,7 +553,11 @@ def run(args, client=None):
     changed |= bool(n_added or n_changed or n_removed)
 
     if n_added or n_removed:
-        notify("우리말역사어휘사전", f"새 표제어 {n_added}개, 삭제 {n_removed}개")
+        rows = db.execute("SELECT kind, target_code, form FROM changes WHERE at>=? AND kind IN ('added','removed') ORDER BY id",
+                          (start_iso,)).fetchall()
+        label = {"added": "새 표제어", "removed": "삭제"}
+        ALERT_FILE.write_text(f"{uf.now()}\n" + "".join(f"{label[k]} #{c}: {f or ''}\n" for k, c, f in rows), encoding="utf-8")
+        notify("우리말역사어휘사전", f"새 표제어 {n_added}개, 삭제 {n_removed}개. 자세히: urimal-history-db 폴더에서 python3 urimal_update.py --alerts")
     built = False
     if "build" in steps:
         if changed or args.force_build:
@@ -615,6 +621,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--alerts", action="store_true", help="마지막 알림(새 표제어·삭제)의 전체 내용")
     ap.add_argument("--steps", help=f"쉼표로 구분한 단계 ({','.join(ALL_STEPS)})")
     ap.add_argument("--oldest-n", type=int, default=OLDEST_PER_DAY)
     ap.add_argument("--limit", type=int, default=CALL_LIMIT, help="하루 API 호출 상한 (기본 %(default)s)")
@@ -625,6 +632,9 @@ def main():
     args = ap.parse_args()
     if args.status:
         return status()
+    if args.alerts:
+        print(ALERT_FILE.read_text(encoding="utf-8") if ALERT_FILE.exists() else "(알림 기록 없음)")
+        return
     if not args.dry_run:
         trim_log(LOG_PATH)
         trim_by_mtime(LAUNCHD_LOG)
