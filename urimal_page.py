@@ -145,18 +145,17 @@ def head_html(d, ctx=None):
 def source_note(d):
     """자료 출처가 달라 원본과 다를 수 있는 항목에 붙이는 안내."""
     if d.get("source") == "download":
-        return ('<p class="warn">※ 이 표제어는 Open API가 내주지 않아 누리집 전체 내려받기 파일의 내용입니다. '
-                '큰따옴표(“ ”)·줄바꿈·용례 강조가 없습니다.</p>')
+        return '<p class="warn">※ 이 표제어는 Open API가 주지 않아 별도로 받은 사전 전체 파일의 내용으로 대체했습니다.</p>'
     return ""
 
 
 def field_note(d, col):
     """긴 설명 필드(col)가 이어 붙인 글이거나 끝내 잘린 글이면 그 사실을 알린다."""
     if col in (d.get("truncated_fields") or "").split(","):
-        return ('<p class="warn">※ 이 글은 중간에서 잘려 있습니다(Open API가 256자까지만 주고 뒷부분을 이어 붙이지 못했습니다). '
+        return ('<p class="warn">※ 이 글은 중간에서 잘려 있습니다. '
                 f'전문은 <a href="{html.escape(ul.original_url(d["form"], d["target_code"]))}" target="_blank" rel="noopener noreferrer">우리말역사어휘사전 ↗</a>에서 볼 수 있습니다.</p>')
     if col in (d.get("merged_fields") or "").split(","):
-        return ('<p class="warn">※ 뒷부분은 누리집 전체 내려받기 파일에서 이어 붙인 것이라 큰따옴표(“ ”)와 줄바꿈이 없습니다.</p>')
+        return '<p class="warn">※ 이 글에서 Open API가 주지 않은 뒷부분은 별도로 받은 사전 전체 파일로 보충했습니다.</p>'
     return ""
 
 

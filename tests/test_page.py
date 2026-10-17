@@ -151,13 +151,14 @@ class Rendered(unittest.TestCase):
 
     def test_notes_for_merged_truncated_and_download_only(self):
         merged = self.db.execute("SELECT target_code FROM entries WHERE merged_fields LIKE '%language_info%' LIMIT 1").fetchone()[0]
-        self.assertIn("뒷부분은 누리집 전체 내려받기 파일에서 이어 붙인 것", up.entry_html(up.load_entry(self.db, merged)))
+        self.assertIn("이 글에서 Open API가 주지 않은 뒷부분은 별도로 받은 사전 전체 파일로 보충했습니다", up.entry_html(up.load_entry(self.db, merged)))
         cut = self.db.execute("SELECT target_code FROM entries WHERE truncated_fields IS NOT NULL LIMIT 1").fetchone()[0]
         html = up.entry_html(up.load_entry(self.db, cut))
         self.assertIn("중간에서 잘려 있습니다", html)
+        self.assertNotIn("256자", html)                                                # 내부 사정은 적지 않는다
         self.assertIn("우리말역사어휘사전 ↗</a>에서 볼 수 있습니다", html)
         down = self.db.execute("SELECT target_code FROM entries WHERE source='download' LIMIT 1").fetchone()[0]
-        self.assertIn("내려받기 파일의 내용입니다", up.entry_html(up.load_entry(self.db, down)))
+        self.assertIn("이 표제어는 Open API가 주지 않아 별도로 받은 사전 전체 파일의 내용으로 대체했습니다", up.entry_html(up.load_entry(self.db, down)))
         plain = self.db.execute("SELECT target_code FROM entries WHERE source='api' AND merged_fields IS NULL AND truncated_fields IS NULL "
                                 "AND language_info IS NOT NULL LIMIT 1").fetchone()[0]
         self.assertNotIn('class="warn"', up.entry_html(up.load_entry(self.db, plain)))   # 문제없는 항목에는 안내가 없다
