@@ -141,7 +141,7 @@ class Rendered(unittest.TestCase):
 
     def test_site_link_goes_to_the_exact_entry_and_there_is_no_raw_button(self):
         html = self.page("form", "서리")
-        self.assertEqual(html.count("누리집 ↗"), 2)
+        self.assertEqual(html.count("우리말역사어휘사전 ↗"), 2)
         self.assertIn("searchResultDetail?searchWord=%EC%84%9C%EB%A6%AC&amp;etymNo=861", html)    # 항목 바로가기(etymNo = target_code)
         self.assertIn("etymNo=2161", html)
         self.assertIn('target="_blank" rel="noopener noreferrer"', html)               # 새 창, 출처 정보 안 보냄
@@ -155,7 +155,7 @@ class Rendered(unittest.TestCase):
         cut = self.db.execute("SELECT target_code FROM entries WHERE truncated_fields IS NOT NULL LIMIT 1").fetchone()[0]
         html = up.entry_html(up.load_entry(self.db, cut))
         self.assertIn("중간에서 잘려 있습니다", html)
-        self.assertIn("누리집 ↗</a>에서 볼 수 있습니다", html)
+        self.assertIn("우리말역사어휘사전 ↗</a>에서 볼 수 있습니다", html)
         down = self.db.execute("SELECT target_code FROM entries WHERE source='download' LIMIT 1").fetchone()[0]
         self.assertIn("내려받기 파일의 내용입니다", up.entry_html(up.load_entry(self.db, down)))
         plain = self.db.execute("SELECT target_code FROM entries WHERE source='api' AND merged_fields IS NULL AND truncated_fields IS NULL "

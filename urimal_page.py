@@ -7,7 +7,7 @@ urimal_html.py 는 결과 글자를 `<pre>` 한 덩어리로 넣는데, 이 모�
   - 긴 설명(어휘 역사 설명·부가 정보·기타 정보): 문단(##)과 줄로 나누고 [예]·[현대어 역] 줄은 작고 옅게 구분한다.
   - 용례는 세기별로 접었다 펼 수 있고(<details>), '모두 펼치기/접기' 버튼이 있다. 용례가 적으면 처음부터 펼쳐 둔다.
   - 같은 표제어가 둘 이상(동형이의어)이면 맨 위에 바로가기 목차를 둔다.
-  - 항목마다 "누리집 ↗"(국립국어원 누리집의 그 항목 화면). 이어 붙인 설명·끝내 잘린 설명·내려받기 파일에서만 온 표제어에는 그 사실을 작게 알린다.
+  - 항목마다 "우리말역사어휘사전 ↗"(국립국어원 누리집의 그 항목 화면). 이어 붙인 설명·끝내 잘린 설명·내려받기 파일에서만 온 표제어에는 그 사실을 작게 알린다.
   - 링크(link_base 가 있을 때만; 로컬 링크 서버가 보내는 화면): 관련어는 그 말이 표제어일 때, 어휘 역사의 옛 표기와 '그 밖의 표기'는 다른
     표제어에도 쓰인 표기일 때만 눌러서 그 조회 화면으로 간다(없는 곳으로 가는 링크는 만들지 않는다). 저장된 파일(file://)에는 링크가 없다.
 
@@ -137,7 +137,7 @@ def load_entry(db, code):
 def head_html(d, ctx=None):
     num = f"<sup>{d['word_number']}</sup>" if d["word_number"] != 1 or d["homonyms"] > 1 else ""
     links = (f'<a class="orig" href="{html.escape(ul.original_url(d["form"], d["target_code"]))}" '
-             f'target="_blank" rel="noopener noreferrer">누리집 ↗</a>')
+             f'target="_blank" rel="noopener noreferrer">우리말역사어휘사전 ↗</a>')
     return (f'<header><h2>{esc(d["form"])}{num}</h2>'
             f'<span class="meta">{esc(d["type"])} · #{d["target_code"]}</span>{links}</header>')
 
@@ -154,7 +154,7 @@ def field_note(d, col):
     """긴 설명 필드(col)가 이어 붙인 글이거나 끝내 잘린 글이면 그 사실을 알린다."""
     if col in (d.get("truncated_fields") or "").split(","):
         return ('<p class="warn">※ 이 글은 중간에서 잘려 있습니다(Open API가 256자까지만 주고 뒷부분을 이어 붙이지 못했습니다). '
-                f'전문은 <a href="{html.escape(ul.original_url(d["form"], d["target_code"]))}" target="_blank" rel="noopener noreferrer">누리집 ↗</a>에서 볼 수 있습니다.</p>')
+                f'전문은 <a href="{html.escape(ul.original_url(d["form"], d["target_code"]))}" target="_blank" rel="noopener noreferrer">우리말역사어휘사전 ↗</a>에서 볼 수 있습니다.</p>')
     if col in (d.get("merged_fields") or "").split(","):
         return ('<p class="warn">※ 뒷부분은 누리집 전체 내려받기 파일에서 이어 붙인 것이라 큰따옴표(“ ”)와 줄바꿈이 없습니다.</p>')
     return ""

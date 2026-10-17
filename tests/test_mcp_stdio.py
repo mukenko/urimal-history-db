@@ -120,7 +120,7 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             sample = sample.lstrip("· ")                                              # 텍스트 결과의 글머리 기호는 HTML 에 없다
             self.assertIn(sample, htmllib.unescape(re.sub(r"<[^>]+>", "", page)))      # 결과의 옛한글 줄이 그대로 들어 있다(강조 태그만 뺌)
             self.assertNotIn("원본 데이터 ↗", page)                                    # 원본 데이터 버튼은 없다
-            self.assertIn("누리집 ↗", page)                                            # 누리집 버튼은 있다
+            self.assertIn("우리말역사어휘사전 ↗", page)                                            # 우리말역사어휘사전 버튼은 있다
             # 규칙은 서버 지침과 도구 설명에 있다(링크가 있으면 [원본 보기](URL)로 답변 끝에 적는다)
             ins = init.instructions
             self.assertIn("원본 보기", ins)
