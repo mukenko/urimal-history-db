@@ -16,6 +16,8 @@
 | 검색 | `https://kdict.korean.go.kr/history/api/search` (q, start 1~1000, num 10~100, target 1~9, method …) |
 | 내용 | `https://kdict.korean.go.kr/history/api/view` (`method=word_info` 또는 `target_code`) |
 
+명세(요청 변수·응답 필드)는 공식 안내 페이지 https://kdict.korean.go.kr/history/openapi/apiInfo 에서 봅니다(로그인 불필요, 검색·사전 내용 API 표가 한 페이지에 있음). 정기 업데이트가 이 페이지를 읽지는 않고, 명세에 없는 태그나 오타가 실제 응답에 있을 수 있으니 필드는 실제 응답(원본 XML)을 기준으로 확인합니다.
+
 - 인증키는 사용자당 1개, **하루 50,000건** 제한. 스크립트는 상한 전에 멈추도록 가드를 둡니다.
 - 키는 `.env`의 `URIMAL_HISTORY_API_KEY`에만 두고 저장소에 올리지 않습니다.
 - 검색 API는 start가 최대 1000이라 검색어당 1,000건까지만 → 전수 수집은 `target_code` 또는 내려받기 파일로.
