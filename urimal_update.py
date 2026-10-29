@@ -52,6 +52,9 @@ import urimal_import as ui
 
 ROOT = Path(__file__).resolve().parent
 LOG_PATH = ROOT / "data" / "update.log"
+# 한 실행에서 삭제로 확정할 수 있는 최대 개수. 평소 하루 0~3건이라, 이보다 많이 한꺼번에 비어 오면 사전이 아니라
+# API 쪽 이상(2026-10-29: 160건이 이틀 새 빈 응답, `하나`·`하늘` 포함)으로 보고 확정하지 않고 알린다.
+MAX_REMOVALS_PER_RUN = 20
 ALERT_FILE = ROOT / "data" / "last_alert.txt"          # 마지막 알림(새 표제어·삭제)의 전체 내용
 LAUNCHD_LOG = ROOT / "data" / "update_launchd.log"
 DOWNLOAD_DIR = ROOT / "data" / "download"
@@ -213,7 +216,8 @@ def meta_write(db, **kv):
 
 def format_summary(counts, pending, built, incomplete, failed, used, limit):
     changes = ", ".join(f"{k} {counts[k]}" for k in ("added", "changed", "removed") if counts.get(k)) or "없음"
-    return (f"변경 {changes}, 삭제 대기 {pending}, 빌드 {'했음' if built else '안 함'}, "
+    held = f", 삭제 확정 보류 {counts['held']}(API 이상 의심)" if counts.get("held") else ""
+    return (f"변경 {changes}, 삭제 대기 {pending}{held}, 빌드 {'했음' if built else '안 함'}, "
             f"미완료 단계 {incomplete or '없음'}, 실패 {failed or '없음'}, 오늘 호출 {used}/{limit}")
 
 
@@ -333,13 +337,16 @@ def remove_code(db, code):
     uf.set_state(db, code, "gone", None)
 
 
-def handle_empty(db, code):
+def handle_empty(db, code, allow_remove=True):
     """이전에 있던 코드가 비어 왔다. 일시적인 빈 응답일 수 있어(같은 순간에 되풀이되기도 한다) 같은 날에는 확정하지 않고
-    fetch_state.note 에 'empty@날짜' 로 표시만 한다. **다른 날** 또 비어 오면 삭제로 확정한다. 반환: pending | removed"""
+    fetch_state.note 에 'empty@날짜' 로 표시만 한다. **다른 날** 또 비어 오면 삭제로 확정한다(allow_remove=False 면 확정을 미룬다).
+    반환: pending | removed | held"""
     row = db.execute("SELECT note FROM fetch_state WHERE target_code=?", (code,)).fetchone()
     note = (row[0] or "") if row else ""
     if note.startswith("empty@"):
         if note[len("empty@"):] < uf.today():
+            if not allow_remove:
+                return "held"                                  # 한꺼번에 너무 많이 비어 옴: 확정하지 않고 표시를 그대로 둔다
             remove_code(db, code)
             return "removed"
         return "pending"                                       # 오늘 이미 표시함: 내일 이후에 다시 확인
@@ -371,7 +378,7 @@ def run_refresh(client, codes, label, counts, previously_ok=True, done=None, reg
             r = refresh_code(client, code, info)
             if r == "empty":
                 if previously_ok:
-                    r = handle_empty(client.db, code)
+                    r = handle_empty(client.db, code, allow_remove=counts["removed"] < MAX_REMOVALS_PER_RUN)
                 else:
                     uf.set_state(client.db, code, "empty", None)
             elif regroup is not None:
@@ -534,7 +541,14 @@ def run(args, client=None):
         if name not in steps or not ok:
             continue
         counts = Counter()
-        ok = run_refresh(client, getter(), name, counts, previously_ok=prev_ok, done=done, regroup=regroup)
+        todo = getter()
+        if name == "pending" and len(todo) > MAX_REMOVALS_PER_RUN:
+            # 삭제 대기가 이렇게 많은 것은 사전이 아니라 API 이상일 가능성이 크다: 지우지 않고 알린 뒤 다음 실행에서 다시 본다
+            log(f"pending: 삭제 대기 {len(todo)}개가 한 번 확정할 수 있는 최대 {MAX_REMOVALS_PER_RUN}개를 넘어 확정하지 않습니다(API 이상 의심).")
+            notify("우리말역사어휘사전", f"삭제 대기 {len(todo)}개: API 이상이 의심되어 삭제를 확정하지 않았습니다.")
+            counts_total["held"] = counts_total.get("held", 0) + len(todo)
+            continue
+        ok = run_refresh(client, todo, name, counts, previously_ok=prev_ok, done=done, regroup=regroup)
         db.commit()
         if not ok:
             incomplete.append(name)

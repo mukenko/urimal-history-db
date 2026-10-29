@@ -396,3 +396,46 @@ class Summary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MassEmptyGuard(DbCase):
+    """API 이상으로 한꺼번에 많이 비어 오면 삭제를 확정하지 않는다(2026-10-29, 160건이 하루에 확정된 일)."""
+
+    def setUp(self):
+        super().setUp()
+        self.notices = []
+        old = uu.notify
+        uu.notify = lambda title, text: self.notices.append(text)
+        self.addCleanup(setattr, uu, "notify", old)
+        for code in range(100, 100 + uu.MAX_REMOVALS_PER_RUN + 5):
+            self.seed(code, f"말{code}", 1, note="empty@2026-10-01")
+        self.client = FakeClient(self.db, {})
+
+    def test_run_refresh_stops_confirming_after_the_cap(self):
+        counts = uu.Counter()
+        uu.run_refresh(self.client, uu.codes_pending(self.db), "t", counts, previously_ok=True)
+        self.assertEqual(counts["removed"], uu.MAX_REMOVALS_PER_RUN)
+        self.assertEqual(counts["held"], 5)
+        held = [c for c in range(100, 100 + uu.MAX_REMOVALS_PER_RUN + 5) if self.has_raw(c)]
+        self.assertEqual(len(held), 5)
+        self.assertTrue(all(self.state(c) == ("ok", "empty@2026-10-01") for c in held))     # 표시는 그대로
+
+    def test_run_skips_pending_step_when_too_many_and_notifies(self):
+        args = argparse.Namespace(steps="pending", dry_run=False, oldest_n=10, limit=100000, sleep=0,
+                                  force_download=False, force_build=False)
+        before = self.db.execute("SELECT COUNT(*) FROM raw_xml").fetchone()[0]
+        result = uu.run(args, client=self.client)
+        self.assertEqual(result, "ok")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM raw_xml").fetchone()[0], before)   # 하나도 지우지 않음
+        self.assertEqual(self.client.requested, [])                                               # 호출도 안 함
+        self.assertTrue(any("삭제를 확정하지 않았습니다" in n for n in self.notices))
+        self.assertIn("삭제 확정 보류", dict(self.db.execute("SELECT key, value FROM sync_meta"))["update_last_summary"])
+
+    def test_few_pending_are_confirmed_as_before(self):
+        for code in range(100 + 3, 100 + uu.MAX_REMOVALS_PER_RUN + 5):
+            self.db.execute("UPDATE fetch_state SET note=NULL WHERE target_code=?", (code,))
+        self.db.commit()
+        counts = uu.Counter()
+        uu.run_refresh(self.client, uu.codes_pending(self.db), "t", counts, previously_ok=True)
+        self.assertEqual(counts["removed"], 3)
+        self.assertEqual(counts["held"], 0)
