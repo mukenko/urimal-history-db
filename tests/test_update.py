@@ -439,3 +439,62 @@ class MassEmptyGuard(DbCase):
         uu.run_refresh(self.client, uu.codes_pending(self.db), "t", counts, previously_ok=True)
         self.assertEqual(counts["removed"], 3)
         self.assertEqual(counts["held"], 0)
+
+
+class DownloadCorroboration(DbCase):
+    """공식 내려받기 파일에도 없는 코드는 상한 없이 삭제 확정하고, 확인되지 않은 대기가 많으면 그것만 보류한다(2026-11-02)."""
+
+    def setUp(self):
+        super().setUp()
+        self.notices = []
+        old = uu.notify
+        uu.notify = lambda title, text: self.notices.append(text)
+        self.addCleanup(setattr, uu, "notify", old)
+        self.n = uu.MAX_REMOVALS_PER_RUN + 10
+        self.gone = list(range(100, 100 + self.n))              # 공식 파일에 없는 대기
+        self.kept = list(range(500, 500 + self.n))              # 공식 파일에 있는 대기
+        for code in self.gone + self.kept:
+            self.seed(code, f"말{code}", 1, note="empty@2026-10-01")
+        self.client = FakeClient(self.db, {})                  # 서버는 전부 빈 응답
+
+    def import_download(self, codes):
+        self.db.execute("CREATE TABLE IF NOT EXISTS raw_download(target_code INTEGER PRIMARY KEY, source TEXT, created TEXT, imported_at TEXT, xml TEXT)")
+        self.db.executemany("INSERT INTO raw_download VALUES(?,?,?,?,?)", [(c, "d", "20261101", "t", "x") for c in codes])
+        self.db.commit()
+
+    def args(self):
+        return argparse.Namespace(steps="pending", dry_run=False, oldest_n=10, limit=100000, sleep=0,
+                                  force_download=False, force_build=False)
+
+    def test_without_a_download_nothing_is_corroborated(self):
+        self.assertEqual(uu.codes_missing_from_download(self.db), set())
+
+    def test_missing_from_download_is_the_set_difference(self):
+        self.import_download([1, 2] + self.kept)
+        self.assertEqual(uu.codes_missing_from_download(self.db), set(self.gone))
+
+    def test_run_refresh_removes_all_corroborated_beyond_the_cap_and_holds_the_rest(self):
+        self.import_download(self.kept)
+        counts = uu.Counter()
+        uu.run_refresh(self.client, uu.codes_pending(self.db), "t", counts, previously_ok=True)
+        self.assertEqual(counts["removed"], self.n + uu.MAX_REMOVALS_PER_RUN)       # 근거 있는 n개 + 근거 없는 상한만큼
+        self.assertEqual(counts["held"], self.n - uu.MAX_REMOVALS_PER_RUN)
+        self.assertFalse(any(self.has_raw(c) for c in self.gone))
+        self.assertEqual(sum(self.has_raw(c) for c in self.kept), self.n - uu.MAX_REMOVALS_PER_RUN)
+
+    def test_pending_step_still_processes_corroborated_when_the_rest_is_too_many(self):
+        self.import_download(self.kept)
+        result = uu.run(self.args(), client=self.client)
+        self.assertEqual(result, "ok")
+        self.assertFalse(any(self.has_raw(c) for c in self.gone))                     # 공식 파일에도 없는 것은 지워짐
+        self.assertTrue(all(self.has_raw(c) for c in self.kept))                      # 근거 없는 대기는 많아서 보류
+        self.assertTrue(any("확정하지 않았습니다" in n for n in self.notices))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM raw_removed").fetchone()[0], self.n)
+
+    def test_corroborated_but_api_still_has_it_is_kept(self):
+        self.import_download(self.kept)
+        self.client.server[self.gone[0]] = entry_xml(self.gone[0], f"말{self.gone[0]}", 1)
+        counts = uu.Counter()
+        uu.run_refresh(self.client, [self.gone[0]], "t", counts, previously_ok=True)
+        self.assertTrue(self.has_raw(self.gone[0]))
+        self.assertEqual(self.state(self.gone[0]), ("ok", None))

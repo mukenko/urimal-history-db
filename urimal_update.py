@@ -254,6 +254,15 @@ def imported_created(db):
     return row[0] if row and row[0] else None
 
 
+def codes_missing_from_download(db):
+    """가져온 내려받기 파일(누리집이 매달 만드는 공식 전체 파일)에 없는 raw_xml 코드. 삭제의 독립된 근거다:
+    API 가 비어 와도 공식 파일에 있으면 API 이상일 수 있지만(2026-10-29), 공식 파일에도 없으면 사전에서 빠진 것이다(2026-11-02, 858건).
+    내려받기 파일을 가져온 적이 없으면 빈 집합(= 근거 없음)."""
+    if not imported_created(db):
+        return set()
+    return {r[0] for r in db.execute("SELECT target_code FROM raw_xml WHERE target_code NOT IN (SELECT target_code FROM raw_download)")}
+
+
 def step_download(db, force=False, dry=False):
     """새 내려받기 파일이 있으면 받아 가져온다. 바뀌었으면 True."""
     have = imported_created(db)
@@ -368,6 +377,8 @@ def run_refresh(client, codes, label, counts, previously_ok=True, done=None, reg
     """codes 를 차례로 다시 받는다. 한도·치명 오류에서 멈추고 False 를 돌려준다.
     done: 이번 실행에서 이미 받은 코드(중복 호출 방지), regroup: 같은 표제어 항목을 다시 받아야 하는 표제어를 모은다."""
     consecutive_err = 0
+    official = codes_missing_from_download(client.db)          # 공식 내려받기 파일에도 없는 코드: 상한 없이 확정할 수 있다
+    uncorroborated = 0                                         # 상한(MAX_REMOVALS_PER_RUN)은 이런 근거 없는 확정만 센다
     for code in codes:
         if done is not None:
             if code in done:
@@ -378,7 +389,9 @@ def run_refresh(client, codes, label, counts, previously_ok=True, done=None, reg
             r = refresh_code(client, code, info)
             if r == "empty":
                 if previously_ok:
-                    r = handle_empty(client.db, code, allow_remove=counts["removed"] < MAX_REMOVALS_PER_RUN)
+                    r = handle_empty(client.db, code, allow_remove=code in official or uncorroborated < MAX_REMOVALS_PER_RUN)
+                    if r == "removed" and code not in official:
+                        uncorroborated += 1
                 else:
                     uf.set_state(client.db, code, "empty", None)
             elif regroup is not None:
@@ -542,12 +555,22 @@ def run(args, client=None):
             continue
         counts = Counter()
         todo = getter()
-        if name == "pending" and len(todo) > MAX_REMOVALS_PER_RUN:
-            # 삭제 대기가 이렇게 많은 것은 사전이 아니라 API 이상일 가능성이 크다: 지우지 않고 알린 뒤 다음 실행에서 다시 본다
-            log(f"pending: 삭제 대기 {len(todo)}개가 한 번 확정할 수 있는 최대 {MAX_REMOVALS_PER_RUN}개를 넘어 확정하지 않습니다(API 이상 의심).")
-            notify("우리말역사어휘사전", f"삭제 대기 {len(todo)}개: API 이상이 의심되어 삭제를 확정하지 않았습니다.")
-            counts_total["held"] = counts_total.get("held", 0) + len(todo)
-            continue
+        if name == "pending":
+            official = codes_missing_from_download(db)
+            unconfirmed = [c for c in todo if c not in official]
+            held_some = len(unconfirmed) > MAX_REMOVALS_PER_RUN
+            if held_some:
+                # 공식 내려받기 파일에서 확인되지 않은 대기가 이렇게 많은 것은 사전이 아니라 API 이상일 가능성이 크다:
+                # 지우지 않고 알린 뒤 다음 실행에서 다시 본다(공식 파일에도 없는 코드는 상한 없이 계속 처리)
+                log(f"pending: 내려받기 파일로 확인되지 않은 삭제 대기 {len(unconfirmed)}개가 한 번 확정할 수 있는 최대 "
+                    f"{MAX_REMOVALS_PER_RUN}개를 넘어 이 코드들은 확정하지 않습니다(API 이상 의심).")
+                notify("우리말역사어휘사전", f"삭제 대기 {len(unconfirmed)}개: API 이상이 의심되어 삭제를 확정하지 않았습니다.")
+                counts_total["held"] = counts_total.get("held", 0) + len(unconfirmed)
+                todo = [c for c in todo if c in official]
+            if official and todo:
+                log(f"pending: 공식 내려받기 파일에도 없는 대기 {len([c for c in todo if c in official])}개는 API 가 다른 날 또 비면 상한 없이 확정합니다.")
+            if held_some and not todo:
+                continue
         ok = run_refresh(client, todo, name, counts, previously_ok=prev_ok, done=done, regroup=regroup)
         db.commit()
         if not ok:
