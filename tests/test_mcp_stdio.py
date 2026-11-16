@@ -83,7 +83,7 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
         old_mode = um.HTTP_MODE
         self.addCleanup(setattr, um, "HTTP_MODE", old_mode)
         spec = {"by": "form", "q": "고래", "limit": 30, "max_entries": 8}
-        link = "원본 보기: http://127.0.0.1:1/v/" + "a" * 32
+        link = "[원본 보기](http://127.0.0.1:1/v/" + "a" * 32 + ")"
         lines = um._with_footer("결과 글", "고래", spec).split("\n")
         self.assertEqual(lines[0], "결과 글")
         self.assertEqual(lines[1], link)
@@ -111,9 +111,9 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             out = text(await s.call_tool("lookup_word", {"word": "나무"}))
             lines = out.rstrip().splitlines()
             self.assertTrue(lines[-1].startswith("출처:"))
-            self.assertRegex(lines[-2], r"^원본 보기: http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}$")
+            self.assertRegex(lines[-2], r"^\[원본 보기\]\(http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}\)$")
             self.assertNotIn("옛한글 포함", out)                                        # 깨질 수 있다는 안내 줄은 두지 않는다
-            url = lines[-2].split(": ", 1)[1]
+            url = lines[-2][len("[원본 보기]("):-1]
             page = urllib.request.urlopen(url, timeout=5).read().decode("utf-8")
             self.assertIn('lang="ko"', page)
             sample = next(l.strip().split("  <")[0] for l in lines if any(0x1100 <= ord(c) <= 0x11FF for c in l) and "[" not in l[:6])
@@ -138,7 +138,7 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             for call, args in (("lookup_word", {"word": "가-건물"}),
                                ("search_dictionary", {"query": "고드", "by": "prefix", "limit": 5})):
                 out = text(await s.call_tool(call, args))
-                self.assertRegex(out, r"\n원본 보기: http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}\n출처:", call)
+                self.assertRegex(out, r"\n\[원본 보기\]\(http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}\)\n출처:", call)
             miss = text(await s.call_tool("lookup_word", {"word": "쀏쀏쀏쀏"}))
             self.assertNotIn("원본 보기", miss)
 

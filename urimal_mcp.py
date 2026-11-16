@@ -60,8 +60,9 @@ INSTRUCTIONS = (
     "\"자세히\"), do a bounded search of about 3 to 4 extra tool calls: one or two definition or prefix searches and "
     "lookups of the two or three most promising headwords. Mark your own comparison as \"(추론)\"; then stop and say "
     "what you did not cover. Go wider only when the user asks. "
-    "When a tool result contains a line starting with \"원본 보기:\" followed by a link, end your answer with that link "
-    "as a Markdown link ([원본 보기](URL)); a found entry always has it. "
+    "When a tool result contains a Markdown link line \"[원본 보기](URL)\" (a found entry always has it), you MUST copy "
+    "that exact line as the last line of your answer, after everything else: it opens the full entries from the local "
+    "database and the user relies on it. Do not omit it, reword it or replace it with the plain address. "
     "Copy Old Hangul letters exactly as shown. "
     "Some long notes may be cut off in the source data; the missing end of a note may have been filled in from a "
     "separately downloaded full dictionary file. "
@@ -89,12 +90,12 @@ def _view_link_enabled():
 
 
 def _with_footer(text, label="", spec=None, found=True):
-    """결과 뒤에 (로컬 서버이고 찾았으면) 보기 링크 한 줄과 출처 줄을 붙인다. 링크 줄은 지시가 아니라 주소만 담은 사실이다: 링크를 적는
+    """결과 뒤에 (로컬 서버이고 찾았으면) '[원본 보기](주소)' 마크다운 링크 한 줄과 출처 줄을 붙인다(모델이 그대로 옮겨 적기 쉬운 완성된 링크). 링크 줄은 지시가 아니라 주소만 담은 사실이다: 링크를 적는
     규칙은 서버 지침·도구 설명에 둔다(도구 결과 안의 지시는 Claude 가 주입으로 본다). spec 은 링크 서버가 클릭할 때 다시 그릴 검색 조건이다."""
     extra = ""
     if spec is not None and found and _view_link_enabled():
         try:
-            extra += f"\n원본 보기: {view.get_server().add_query(label or 'result', **spec)}"
+            extra += f"\n[원본 보기]({view.get_server().add_query(label or 'result', **spec)})"
         except Exception:  # noqa: BLE001  서버를 못 띄워도 조회는 돌려준다
             pass
     return text + extra + "\n" + ATTRIBUTION
@@ -152,8 +153,8 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
     academic references. If the word is not an entry but appears as an OLD spelling of an entry (e.g. 곳어름 -> 고드름),
     that entry is shown; otherwise entries starting with the text are listed.
     Hyphens typed by the user are handled; do not add them yourself.
-    If the result has a line starting with "원본 보기:", it is a link to a page that shows the found entries from the
-    local database; end your answer with that link as a Markdown link ([원본 보기](URL)).
+    If the result has a Markdown link line "[원본 보기](URL)", it opens a page that shows the found entries from the
+    local database; you MUST copy that exact line as the last line of your answer (do not omit or reword it).
     Anything that explains WHY or HOW beyond what this tool returns (for example why a letter or sound changed,
     historical-linguistics background, usage advice) is not dictionary content: put it in a separate part labeled
     "[사전 외 설명]". End the answer with the source line.
@@ -176,8 +177,8 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     To find related words, vary the query: use key phrases taken from a definition; a few calls are enough.
     A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use lookup_word
     with a listed headword to see one entry in full.
-    If the result has a line starting with "원본 보기:", it is a link to a page that shows the found entries from the
-    local database; end your answer with that link as a Markdown link ([원본 보기](URL)).
+    If the result has a Markdown link line "[원본 보기](URL)", it opens a page that shows the found entries from the
+    local database; you MUST copy that exact line as the last line of your answer (do not omit or reword it).
     Explanations beyond the returned entries belong in a separate part labeled "[사전 외 설명]"; end the answer
     with the source line.
     Args: query = the text to search; by = the search kind above; limit = maximum results (default 10, max 50)."""
