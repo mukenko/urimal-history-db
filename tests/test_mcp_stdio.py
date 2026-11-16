@@ -46,8 +46,8 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             self.assertIn("[사전 외 설명]", init.instructions)         # 사전 밖 설명은 표시하면 덧붙일 수 있다
             self.assertIn("never invent", init.instructions.lower())
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"lookup_word", "search_dictionary"})
-            by = tools["search_dictionary"].input_schema["properties"]["by"]
+            self.assertEqual(set(tools), {"urimal_lookup_word", "urimal_search_dictionary"})
+            by = tools["urimal_search_dictionary"].input_schema["properties"]["by"]
             self.assertEqual(set(by["enum"]), {"historical_form", "definition", "prefix"})
 
     async def test_three_tiers_and_proportional_research_guidance(self):
@@ -58,13 +58,13 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(needle, ins, needle)
             self.assertNotIn("without asking permission", ins)               # 먼저 제안하고 동의하면 탐색한다(2026-10-15)
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertIn("key phrases", tools["search_dictionary"].description)
-            for name in ("lookup_word", "search_dictionary"):                       # 도구 설명에도 표시 규칙과 전형적인 예
+            self.assertIn("key phrases", tools["urimal_search_dictionary"].description)
+            for name in ("urimal_lookup_word", "urimal_search_dictionary"):                       # 도구 설명에도 표시 규칙과 전형적인 예
                 d = tools[name].description
                 self.assertIn("[사전 외 설명]", d, name)
                 self.assertIn("source line", d, name)
-            self.assertIn("why a letter or sound changed", tools["lookup_word"].description)
-            notice = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0})).split("\n")[-1]
+            self.assertIn("why a letter or sound changed", tools["urimal_lookup_word"].description)
+            notice = text(await s.call_tool("urimal_lookup_word", {"word": "고드름", "examples_per_century": 0})).split("\n")[-1]
             for needle in ("(추론)", "[사전 외 설명]"):
                 self.assertIn(needle, notice, needle)
 
@@ -108,7 +108,7 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
         import re
         import urllib.request
         async with session(env={"URIMAL_MCP_NOTICE": "0"}) as (s, init):
-            out = text(await s.call_tool("lookup_word", {"word": "나무"}))
+            out = text(await s.call_tool("urimal_lookup_word", {"word": "나무"}))
             lines = out.rstrip().splitlines()
             self.assertTrue(lines[-1].startswith("출처:"))
             self.assertRegex(lines[-2], r"^\[원본 보기\]\(http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}\)$")
@@ -127,7 +127,7 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             self.assertIn("[원본 보기](URL)", ins)
             self.assertNotIn("may display wrongly", ins)                              # 깨질 수 있다는 설명을 모델이 따라 말하지 않게
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            for name in ("lookup_word", "search_dictionary"):
+            for name in ("urimal_lookup_word", "urimal_search_dictionary"):
                 d = " ".join(tools[name].description.split())                     # 설명의 줄바꿈은 무시한다
                 self.assertIn("원본 보기", d, name)
                 self.assertIn("[원본 보기](URL)", d, name)
@@ -135,16 +135,16 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
     async def test_link_always_present_for_found_entries(self):
         """옛한글이 없어도 찾았으면 항상 '원본 보기' 링크가 붙는다. 못 찾았으면 없다."""
         async with session(env={"URIMAL_MCP_NOTICE": "0"}) as (s, init):
-            for call, args in (("lookup_word", {"word": "가-건물"}),
-                               ("search_dictionary", {"query": "고드", "by": "prefix", "limit": 5})):
+            for call, args in (("urimal_lookup_word", {"word": "가-건물"}),
+                               ("urimal_search_dictionary", {"query": "고드", "by": "prefix", "limit": 5})):
                 out = text(await s.call_tool(call, args))
                 self.assertRegex(out, r"\n\[원본 보기\]\(http://127\.0\.0\.1:\d+/v/[0-9a-f]{32}\)\n출처:", call)
-            miss = text(await s.call_tool("lookup_word", {"word": "쀏쀏쀏쀏"}))
+            miss = text(await s.call_tool("urimal_lookup_word", {"word": "쀏쀏쀏쀏"}))
             self.assertNotIn("원본 보기", miss)
 
     async def test_link_can_be_switched_off(self):
         async with session(env={"URIMAL_MCP_NOTICE": "0", "URIMAL_VIEW_LINK": "0"}) as (s, _):
-            out = text(await s.call_tool("lookup_word", {"word": "나무"}))
+            out = text(await s.call_tool("urimal_lookup_word", {"word": "나무"}))
             self.assertNotIn("원본 보기", out)
             self.assertTrue(out.rstrip().splitlines()[-1].startswith("출처:"))
 
@@ -154,12 +154,12 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("open_in_browser", init.instructions)
             self.assertNotIn("offering to open", init.instructions)         # (탐색 제안의 "offer"는 다른 규칙이라 남아 있다)
             tools = {t.name for t in (await s.list_tools()).tools}
-            self.assertEqual(tools, {"lookup_word", "search_dictionary"})
+            self.assertEqual(tools, {"urimal_lookup_word", "urimal_search_dictionary"})
 
     async def test_notice_has_no_process_directives(self):
         """도구 결과 안의 행동 지시(호출 횟수 등)는 Claude 가 주입으로 보고 따르지 않는다. 탐색 기준은 서버 지침·도구 설명에만."""
         async with session() as (s, _):
-            notice = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0})).split("\n")[-1]
+            notice = text(await s.call_tool("urimal_lookup_word", {"word": "고드름", "examples_per_century": 0})).split("\n")[-1]
             self.assertTrue(notice.startswith("[Note to assistant"))
             for forbidden in ("extra lookups", "3-4", "extra calls", "proportionate", "stop once", "search wider"):
                 self.assertNotIn(forbidden, notice, forbidden)
@@ -167,19 +167,19 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
     async def test_notice_can_be_switched_off(self):
         for value in ("0", "off", "false"):
             async with session(env={"URIMAL_MCP_NOTICE": value}) as (s, init):
-                out = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0}))
+                out = text(await s.call_tool("urimal_lookup_word", {"word": "고드름", "examples_per_century": 0}))
                 self.assertNotIn("Note to assistant", out, value)
                 self.assertIn("고드름", out)
                 self.assertEqual(out.rstrip().splitlines()[-1], "출처: 국립국어원 우리말역사어휘사전 (CC BY-SA 2.0 KR)")
                 self.assertIn("(추론)", init.instructions)
         async with session(env={"URIMAL_MCP_NOTICE": "1"}) as (s, _):
-            out = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0}))
+            out = text(await s.call_tool("urimal_lookup_word", {"word": "고드름", "examples_per_century": 0}))
             self.assertIn("Note to assistant", out)
             self.assertEqual(out.splitlines()[-2], "출처: 국립국어원 우리말역사어휘사전 (CC BY-SA 2.0 KR)")   # 알림 바로 앞
 
     async def test_lookup_word(self):
         async with session() as (s, _):
-            out = text(await s.call_tool("lookup_word", {"word": "고드름", "examples_per_century": 0}))
+            out = text(await s.call_tool("urimal_lookup_word", {"word": "고드름", "examples_per_century": 0}))
             self.assertIn("고드름", out)
             self.assertIn("곳어름", out)
             self.assertIn("Note to assistant", out)
@@ -189,16 +189,16 @@ class Protocol(unittest.IsolatedAsyncioTestCase):
 
     async def test_old_form_and_miss(self):
         async with session() as (s, _):
-            out = text(await s.call_tool("lookup_word", {"word": "곳어름", "examples_per_century": 0}))
+            out = text(await s.call_tool("urimal_lookup_word", {"word": "곳어름", "examples_per_century": 0}))
             self.assertIn("역사 속 표기로 나옵니다", out)
-            out = text(await s.call_tool("lookup_word", {"word": "없는말쓰"}))
+            out = text(await s.call_tool("urimal_lookup_word", {"word": "없는말쓰"}))
             self.assertIn("찾지 못했습니다", out)
 
     async def test_search(self):
         async with session() as (s, _):
-            out = text(await s.call_tool("search_dictionary", {"query": "고드", "by": "prefix"}))
+            out = text(await s.call_tool("urimal_search_dictionary", {"query": "고드", "by": "prefix"}))
             self.assertIn("고드름", out)
-            out = text(await s.call_tool("search_dictionary", {"query": "곳어름", "by": "historical_form"}))
+            out = text(await s.call_tool("urimal_search_dictionary", {"query": "곳어름", "by": "historical_form"}))
             self.assertIn("고드름", out)
 
 

@@ -3,8 +3,8 @@
 
   .venv/bin/python urimal_mcp.py                      # stdio (LM Studio, Claude 데스크톱이 프로세스를 띄움)
   .venv/bin/python urimal_mcp.py --http [--port 8767] # Streamable HTTP (127.0.0.1 에만 바인드, Bearer 토큰 필수)
-  python3 urimal_mcp.py --call lookup_word 고드름     # SDK 없이 도구 결과 확인(시스템 python 도 가능)
-  python3 urimal_mcp.py --call search_dictionary 곳어름 historical_form
+  python3 urimal_mcp.py --call urimal_lookup_word 고드름     # SDK 없이 도구 결과 확인(시스템 python 도 가능)
+  python3 urimal_mcp.py --call urimal_search_dictionary 곳어름 historical_form
 
 읽기 전용 도구 2개. DB 경로는 환경변수 URIMAL_DB(기본 data/urimal.sqlite).
 모델에 전달하는 문구(지침·도구 설명)는 영어다: 작은 로컬 모델이 더 안정적으로 따르고 토큰이 덜 든다(stdict-db 와 같은 방침).
@@ -145,7 +145,7 @@ def _safe(fn):
 
 
 @_safe
-def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) -> str:
+def urimal_lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) -> str:
     """Look up a modern Korean word in the Historical Korean Vocabulary Dictionary (우리말역사어휘사전).
     Returns ALL homonyms of the spelling (numbered), each with its definition(s), the chain of historical spellings with
     the centuries they appear in (e.g. 곳어름 17-19c -> 고도름 -> 고드름), the history/etymology notes, related words,
@@ -169,13 +169,13 @@ def lookup_word(word: str, max_entries: int = 8, examples_per_century: int = 1) 
 
 
 @_safe
-def search_dictionary(query: str, by: Literal["historical_form", "definition", "prefix"], limit: int = 10) -> str:
+def urimal_search_dictionary(query: str, by: Literal["historical_form", "definition", "prefix"], limit: int = 10) -> str:
     """Reverse search in the Historical Korean Vocabulary Dictionary (우리말역사어휘사전).
     by="historical_form": find modern words that were once written with the given OLD spelling, e.g. "곳어름" or "ᄀᆞᆺ".
     by="definition": find words whose definition contains the phrase (any length; 3+ characters use a fast index).
     by="prefix": list entries whose headword starts with the text, e.g. "고드".
     To find related words, vary the query: use key phrases taken from a definition; a few calls are enough.
-    A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use lookup_word
+    A result with up to 3 hits shows the full entries; more hits are listed with their first definition. Use urimal_lookup_word
     with a listed headword to see one entry in full.
     If the result has a Markdown link line "[원본 보기](URL)", it opens a page that shows the found entries from the
     local database; you MUST copy that exact line as the last line of your answer (do not omit or reword it).
@@ -187,7 +187,7 @@ def search_dictionary(query: str, by: Literal["historical_form", "definition", "
     return _with_footer(out, query, {"by": BY_MAP[by], "q": query, "limit": lim}, found) + _notice_tail()
 
 
-TOOLS = (lookup_word, search_dictionary)
+TOOLS = (urimal_lookup_word, urimal_search_dictionary)
 
 
 def _check_db():

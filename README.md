@@ -48,12 +48,12 @@ python3 urimal_lookup.py 고래 --examples all --html   # 글꼴을 지정한 HT
 ## MCP 서버
 
 LLM이 기억이 아니라 사전을 보고 낱말의 옛 표기·어원·용례를 확인하게 하는 읽기 전용 MCP 서버입니다.
-도구 2개: `lookup_word`(동형이의어 전부, 어휘 역사·설명·용례·참고 자료. 옛 표기로 찾아도 표제어를 보여 줌)와
-`search_dictionary`(`historical_form` 옛 표기 / `definition` 뜻풀이 / `prefix` 앞부분으로 역검색).
+도구 2개: `urimal_lookup_word`(동형이의어 전부, 어휘 역사·설명·용례·참고 자료. 옛 표기로 찾아도 표제어를 보여 줌)와
+`urimal_search_dictionary`(`historical_form` 옛 표기 / `definition` 뜻풀이 / `prefix` 앞부분으로 역검색).
 
 ```
 python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt   # mcp 2.x 는 파이썬 3.10 이상
-python3 urimal_mcp.py --call lookup_word 고드름        # SDK 없이 도구 결과 확인
+python3 urimal_mcp.py --call urimal_lookup_word 고드름        # SDK 없이 도구 결과 확인
 ```
 
 - **stdio**(LM Studio, Claude 데스크톱): `{"mcpServers": {"urimal-history": {"command": "/경로/urimal-history-db/.venv/bin/python", "args": ["/경로/urimal-history-db/urimal_mcp.py"]}}}`
